@@ -176,7 +176,9 @@ func defaultPredicates() sets.String {
 				return predicates.NewVolumeBindingPredicate(args.VolumeBinder)
 			},
 		),
-	)
+
+		factory.RegisterFitPredicateFactory(predicates.SiisAdvPred, predicates.SiisAdvPred.Predicate),
+)
 }
 
 // ApplyFeatureGates applies algorithm by feature gates.

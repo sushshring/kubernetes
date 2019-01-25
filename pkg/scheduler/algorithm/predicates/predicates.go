@@ -94,6 +94,8 @@ const (
 	CheckNodeDiskPressurePred = "CheckNodeDiskPressure"
 	// CheckNodePIDPressurePred defines the name of predicate CheckNodePIDPressure.
 	CheckNodePIDPressurePred = "CheckNodePIDPressure"
+	// SiisAdvPred defines the name of the predicatte SiisAdversarialPlacement.
+	SiisAdvPred = "SiisAdversarialPlacement"
 
 	// DefaultMaxGCEPDVolumes defines the maximum number of PD Volumes for GCE
 	// GCE instances can have up to 16 PD volumes attached.
@@ -128,7 +130,7 @@ const (
 // The order is based on the restrictiveness & complexity of predicates.
 // Design doc: https://github.com/kubernetes/community/blob/master/contributors/design-proposals/scheduling/predicates-ordering.md
 var (
-	predicatesOrdering = []string{CheckNodeConditionPred, CheckNodeUnschedulablePred,
+	predicatesOrdering = []string{SiisAdvPred, CheckNodeConditionPred, CheckNodeUnschedulablePred,
 		GeneralPred, HostNamePred, PodFitsHostPortsPred,
 		MatchNodeSelectorPred, PodFitsResourcesPred, NoDiskConflictPred,
 		PodToleratesNodeTaintsPred, PodToleratesNodeNoExecuteTaintsPred, CheckNodeLabelPresencePred,
@@ -306,6 +308,10 @@ type VolumeFilter struct {
 	FilterPersistentVolume func(pv *v1.PersistentVolume) (id string, relevant bool)
 }
 
+type SiisAdversarialFilter struct {
+	targetPodInfo *schedulercache.NodeInfo // TODO: Change this to the actual adversarial input
+}
+
 // NewMaxPDVolumeCountPredicate creates a predicate which evaluates whether a pod can fit based on the
 // number of volumes which match a filter that it requests, and those that are already present.
 //
@@ -445,6 +451,11 @@ func (c *MaxPDVolumeCountChecker) filterVolumes(volumes []v1.Volume, namespace s
 	}
 
 	return nil
+}
+
+func (s *SiisAdversarialFilter) Predicate(pod *v1.Pod, meta algorithm.PredicateMetadata, nodeInfo *schedulercache.NodeInfo) (bool, []algorithm.PredicateFailureReason, error) {
+	glog.Info(fmt.Sprintf("SIIS Scheduler ran: %v\n", nodeInfo))
+	return true, nil, nil
 }
 
 func (c *MaxPDVolumeCountChecker) predicate(pod *v1.Pod, meta algorithm.PredicateMetadata, nodeInfo *schedulercache.NodeInfo) (bool, []algorithm.PredicateFailureReason, error) {
@@ -982,7 +993,7 @@ func NewServiceAffinityPredicate(podLister algorithm.PodLister, serviceLister al
 // 	for the affinity labels.
 //
 // 	To do this, we "reverse engineer" a selector by introspecting existing pods running under the same service+namespace.
-//	These backfilled labels in the selector "L" are defined like so:
+// 	These backfilled labels in the selector "L" are defined like so:
 // 		- L is a label that the ServiceAffinity object needs as a matching constraints.
 // 		- L is not defined in the pod itself already.
 // 		- and SOME pod, from a service, in the same namespace, ALREADY scheduled onto a node, has a matching value.
@@ -1220,9 +1231,9 @@ func GetPodAffinityTerms(podAffinity *v1.PodAffinity) (terms []v1.PodAffinityTer
 			terms = podAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 		}
 		// TODO: Uncomment this block when implement RequiredDuringSchedulingRequiredDuringExecution.
-		//if len(podAffinity.RequiredDuringSchedulingRequiredDuringExecution) != 0 {
-		//	terms = append(terms, podAffinity.RequiredDuringSchedulingRequiredDuringExecution...)
-		//}
+		// if len(podAffinity.RequiredDuringSchedulingRequiredDuringExecution) != 0 {
+		// 	terms = append(terms, podAffinity.RequiredDuringSchedulingRequiredDuringExecution...)
+		// }
 	}
 	return terms
 }
@@ -1234,9 +1245,9 @@ func GetPodAntiAffinityTerms(podAntiAffinity *v1.PodAntiAffinity) (terms []v1.Po
 			terms = podAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 		}
 		// TODO: Uncomment this block when implement RequiredDuringSchedulingRequiredDuringExecution.
-		//if len(podAntiAffinity.RequiredDuringSchedulingRequiredDuringExecution) != 0 {
-		//	terms = append(terms, podAntiAffinity.RequiredDuringSchedulingRequiredDuringExecution...)
-		//}
+		// if len(podAntiAffinity.RequiredDuringSchedulingRequiredDuringExecution) != 0 {
+		// 	terms = append(terms, podAntiAffinity.RequiredDuringSchedulingRequiredDuringExecution...)
+		// }
 	}
 	return terms
 }
