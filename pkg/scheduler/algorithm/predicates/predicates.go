@@ -308,10 +308,6 @@ type VolumeFilter struct {
 	FilterPersistentVolume func(pv *v1.PersistentVolume) (id string, relevant bool)
 }
 
-type SiisAdversarialFilter struct {
-	targetPodInfo *schedulercache.NodeInfo // TODO: Change this to the actual adversarial input
-}
-
 // NewMaxPDVolumeCountPredicate creates a predicate which evaluates whether a pod can fit based on the
 // number of volumes which match a filter that it requests, and those that are already present.
 //
@@ -453,11 +449,6 @@ func (c *MaxPDVolumeCountChecker) filterVolumes(volumes []v1.Volume, namespace s
 	return nil
 }
 
-func (s *SiisAdversarialFilter) Predicate(pod *v1.Pod, meta algorithm.PredicateMetadata, nodeInfo *schedulercache.NodeInfo) (bool, []algorithm.PredicateFailureReason, error) {
-	glog.Info(fmt.Sprintf("SIIS Scheduler ran: %v\n", nodeInfo))
-	return true, nil, nil
-}
-
 func (c *MaxPDVolumeCountChecker) predicate(pod *v1.Pod, meta algorithm.PredicateMetadata, nodeInfo *schedulercache.NodeInfo) (bool, []algorithm.PredicateFailureReason, error) {
 	// If a pod doesn't have any volume attached to it, the predicate will always be true.
 	// Thus we make a fast path for it, to avoid unnecessary computations in this case.
@@ -563,6 +554,22 @@ var AzureDiskVolumeFilter = VolumeFilter{
 		}
 		return "", false
 	},
+}
+
+type SiisAdversarialFilter struct {
+	targetPodInfo *schedulercache.NodeInfo // TODO: Change this to the actual adversarial input
+}
+
+func NewSiisAdversarialFilter() algorithm.FitPredicate {
+	s := &SiisAdversarialFilter{
+		targetPodInfo: nil,
+	}
+	return s.predicate
+}
+
+func (s *SiisAdversarialFilter) predicate(pod *v1.Pod, meta algorithm.PredicateMetadata, nodeInfo *schedulercache.NodeInfo) (bool, []algorithm.PredicateFailureReason, error) {
+	glog.V(3).Info(fmt.Sprintf("SIIS Scheduler ran: %v\n", nodeInfo))
+	return true, nil, nil
 }
 
 // VolumeZoneChecker contains information to check the volume zone for a predicate.

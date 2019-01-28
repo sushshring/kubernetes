@@ -177,8 +177,13 @@ func defaultPredicates() sets.String {
 			},
 		),
 
-		factory.RegisterFitPredicateFactory(predicates.SiisAdvPred, predicates.SiisAdvPred.Predicate),
-)
+		factory.RegisterFitPredicateFactory(
+			predicates.SiisAdvPred,
+			func(args factory.PluginFactoryArgs) algorithm.FitPredicate {
+				return predicates.NewSiisAdversarialFilter()
+			},
+		),
+	)
 }
 
 // ApplyFeatureGates applies algorithm by feature gates.

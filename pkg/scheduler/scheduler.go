@@ -278,6 +278,8 @@ func (sched *Scheduler) Config() *factory.Config {
 
 // schedule implements the scheduling algorithm and returns the suggested host.
 func (sched *Scheduler) schedule(pod *v1.Pod) (string, error) {
+	glog.V(3).Info("Running schedule function")
+	glog.V(3).Info("Current state: ", fmt.Sprintf("%v\n", sched.config))
 	host, err := sched.config.Algorithm.Schedule(pod, sched.config.NodeLister)
 	if err != nil {
 		pod = pod.DeepCopy()
