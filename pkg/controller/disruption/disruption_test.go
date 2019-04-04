@@ -23,8 +23,9 @@ import (
 	"testing"
 	"time"
 
-	apps "k8s.io/api/apps/v1"
+	apps "k8s.io/api/apps/v1beta1"
 	"k8s.io/api/core/v1"
+	extensions "k8s.io/api/extensions/v1beta1"
 	policy "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -101,9 +102,9 @@ func newFakeDisruptionController() (*disruptionController, *pdbStates) {
 		informerFactory.Core().V1().Pods(),
 		informerFactory.Policy().V1beta1().PodDisruptionBudgets(),
 		informerFactory.Core().V1().ReplicationControllers(),
-		informerFactory.Apps().V1().ReplicaSets(),
-		informerFactory.Apps().V1().Deployments(),
-		informerFactory.Apps().V1().StatefulSets(),
+		informerFactory.Extensions().V1beta1().ReplicaSets(),
+		informerFactory.Extensions().V1beta1().Deployments(),
+		informerFactory.Apps().V1beta1().StatefulSets(),
 		nil,
 	)
 	dc.getUpdater = func() updater { return ps.Set }
@@ -119,9 +120,9 @@ func newFakeDisruptionController() (*disruptionController, *pdbStates) {
 		informerFactory.Core().V1().Pods().Informer().GetStore(),
 		informerFactory.Policy().V1beta1().PodDisruptionBudgets().Informer().GetStore(),
 		informerFactory.Core().V1().ReplicationControllers().Informer().GetStore(),
-		informerFactory.Apps().V1().ReplicaSets().Informer().GetStore(),
-		informerFactory.Apps().V1().Deployments().Informer().GetStore(),
-		informerFactory.Apps().V1().StatefulSets().Informer().GetStore(),
+		informerFactory.Extensions().V1beta1().ReplicaSets().Informer().GetStore(),
+		informerFactory.Extensions().V1beta1().Deployments().Informer().GetStore(),
+		informerFactory.Apps().V1beta1().StatefulSets().Informer().GetStore(),
 	}, ps
 }
 
@@ -191,7 +192,7 @@ func updatePodOwnerToRc(t *testing.T, pod *v1.Pod, rc *v1.ReplicationController)
 	pod.OwnerReferences = append(pod.OwnerReferences, controllerReference)
 }
 
-func updatePodOwnerToRs(t *testing.T, pod *v1.Pod, rs *apps.ReplicaSet) {
+func updatePodOwnerToRs(t *testing.T, pod *v1.Pod, rs *extensions.ReplicaSet) {
 	var controllerReference metav1.OwnerReference
 	var trueVar = true
 	controllerReference = metav1.OwnerReference{UID: rs.UID, APIVersion: controllerKindRS.GroupVersion().String(), Kind: controllerKindRS.Kind, Name: rs.Name, Controller: &trueVar}
@@ -257,8 +258,8 @@ func newReplicationController(t *testing.T, size int32) (*v1.ReplicationControll
 	return rc, rcName
 }
 
-func newDeployment(t *testing.T, size int32) (*apps.Deployment, string) {
-	d := &apps.Deployment{
+func newDeployment(t *testing.T, size int32) (*extensions.Deployment, string) {
+	d := &extensions.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1"},
 		ObjectMeta: metav1.ObjectMeta{
 			UID:             uuid.NewUUID(),
@@ -267,7 +268,7 @@ func newDeployment(t *testing.T, size int32) (*apps.Deployment, string) {
 			ResourceVersion: "18",
 			Labels:          fooBar(),
 		},
-		Spec: apps.DeploymentSpec{
+		Spec: extensions.DeploymentSpec{
 			Replicas: &size,
 			Selector: newSelFooBar(),
 		},
@@ -281,8 +282,8 @@ func newDeployment(t *testing.T, size int32) (*apps.Deployment, string) {
 	return d, dName
 }
 
-func newReplicaSet(t *testing.T, size int32) (*apps.ReplicaSet, string) {
-	rs := &apps.ReplicaSet{
+func newReplicaSet(t *testing.T, size int32) (*extensions.ReplicaSet, string) {
+	rs := &extensions.ReplicaSet{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1"},
 		ObjectMeta: metav1.ObjectMeta{
 			UID:             uuid.NewUUID(),
@@ -291,7 +292,7 @@ func newReplicaSet(t *testing.T, size int32) (*apps.ReplicaSet, string) {
 			ResourceVersion: "18",
 			Labels:          fooBar(),
 		},
-		Spec: apps.ReplicaSetSpec{
+		Spec: extensions.ReplicaSetSpec{
 			Replicas: &size,
 			Selector: newSelFooBar(),
 		},
@@ -430,31 +431,6 @@ func TestIntegerMaxUnavailableWithScaling(t *testing.T) {
 	ps.VerifyPdbStatus(t, pdbName, 0, 1, 3, 5, map[string]metav1.Time{})
 }
 
-// Verify that an percentage MaxUnavailable will recompute allowed disruptions when the scale of
-// the selected pod's controller is modified.
-func TestPercentageMaxUnavailableWithScaling(t *testing.T) {
-	dc, ps := newFakeDisruptionController()
-
-	pdb, pdbName := newMaxUnavailablePodDisruptionBudget(t, intstr.FromString("30%"))
-	add(t, dc.pdbStore, pdb)
-
-	rs, _ := newReplicaSet(t, 7)
-	add(t, dc.rsStore, rs)
-
-	pod, _ := newPod(t, "pod")
-	updatePodOwnerToRs(t, pod, rs)
-	add(t, dc.podStore, pod)
-	dc.sync(pdbName)
-	ps.VerifyPdbStatus(t, pdbName, 0, 1, 4, 7, map[string]metav1.Time{})
-
-	// Update scale of ReplicaSet and check PDB
-	rs.Spec.Replicas = to.Int32Ptr(3)
-	update(t, dc.rsStore, rs)
-
-	dc.sync(pdbName)
-	ps.VerifyPdbStatus(t, pdbName, 0, 1, 2, 3, map[string]metav1.Time{})
-}
-
 // Create a pod  with no controller, and verify that a PDB with a percentage
 // specified won't allow a disruption.
 func TestNakedPod(t *testing.T) {
@@ -492,6 +468,7 @@ func TestReplicaSet(t *testing.T) {
 
 // Verify that multiple controllers doesn't allow the PDB to be set true.
 func TestMultipleControllers(t *testing.T) {
+	const rcCount = 2
 	const podCount = 2
 
 	dc, ps := newFakeDisruptionController()
@@ -633,9 +610,10 @@ func TestTwoControllers(t *testing.T) {
 	// code.  If you update a parameter here, recalculate the correct values for
 	// all of them.  Further down in the test, we use these to control loops, and
 	// that level of logic is enough complexity for me.
-	const collectionSize int32 = 11 // How big each collection is
-	const minimumOne int32 = 4      // integer minimum with one controller
-	const minimumTwo int32 = 7      // integer minimum with two controllers
+	const collectionSize int32 = 11   // How big each collection is
+	const minAvailable string = "28%" // minAvailable we'll specify
+	const minimumOne int32 = 4        // integer minimum with one controller
+	const minimumTwo int32 = 7        // integer minimum with two controllers
 
 	pdb, pdbName := newMinAvailablePodDisruptionBudget(t, intstr.FromString("28%"))
 	add(t, dc.pdbStore, pdb)
@@ -735,7 +713,7 @@ func TestPDBNotExist(t *testing.T) {
 
 func TestUpdateDisruptedPods(t *testing.T) {
 	dc, ps := newFakeDisruptionController()
-	dc.recheckQueue = workqueue.NewNamedDelayingQueue("pdb_queue")
+	dc.recheckQueue = workqueue.NewNamedDelayingQueue("pdb-queue")
 	pdb, pdbName := newMinAvailablePodDisruptionBudget(t, intstr.FromInt(1))
 	currentTime := time.Now()
 	pdb.Status.DisruptedPods = map[string]metav1.Time{

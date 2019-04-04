@@ -22,13 +22,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
+	utilflag "k8s.io/apiserver/pkg/util/flag"
 	"k8s.io/client-go/tools/clientcmd"
-	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/annotate"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/apiresources"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/apply"
@@ -73,7 +74,6 @@ import (
 	"k8s.io/kubernetes/pkg/kubectl/util/templates"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/kubernetes/pkg/kubectl/cmd/kustomize"
 )
 
 const (
@@ -248,11 +248,11 @@ __custom_func() {
             __kubectl_get_resource
             return
             ;;
-        kubectl_logs)
+        kubectl_logs | kubectl_attach)
             __kubectl_require_pod_and_container
             return
             ;;
-        kubectl_exec | kubectl_port-forward | kubectl_top_pod | kubectl_attach)
+        kubectl_exec | kubectl_port-forward | kubectl_top_pod)
             __kubectl_get_resource_pod
             return
             ;;
@@ -284,7 +284,7 @@ __custom_func() {
 )
 
 var (
-	bashCompletionFlags = map[string]string{
+	bash_completion_flags = map[string]string{
 		"namespace": "__kubectl_get_resource_namespace",
 		"context":   "__kubectl_config_get_contexts",
 		"cluster":   "__kubectl_config_get_clusters",
@@ -292,12 +292,10 @@ var (
 	}
 )
 
-// NewDefaultKubectlCommand creates the `kubectl` command with default arguments
 func NewDefaultKubectlCommand() *cobra.Command {
-	return NewDefaultKubectlCommandWithArgs(NewDefaultPluginHandler(plugin.ValidPluginFilenamePrefixes), os.Args, os.Stdin, os.Stdout, os.Stderr)
+	return NewDefaultKubectlCommandWithArgs(&defaultPluginHandler{}, os.Args, os.Stdin, os.Stdout, os.Stderr)
 }
 
-// NewDefaultKubectlCommandWithArgs creates the `kubectl` command with arguments
 func NewDefaultKubectlCommandWithArgs(pluginHandler PluginHandler, args []string, in io.Reader, out, errout io.Writer) *cobra.Command {
 	cmd := NewKubectlCommand(in, out, errout)
 
@@ -311,7 +309,7 @@ func NewDefaultKubectlCommandWithArgs(pluginHandler PluginHandler, args []string
 		// only look for suitable extension executables if
 		// the specified command does not already exist
 		if _, _, err := cmd.Find(cmdPathPieces); err != nil {
-			if err := HandlePluginCommand(pluginHandler, cmdPathPieces); err != nil {
+			if err := handleEndpointExtensions(pluginHandler, cmdPathPieces); err != nil {
 				fmt.Fprintf(errout, "%v\n", err)
 				os.Exit(1)
 			}
@@ -325,51 +323,35 @@ func NewDefaultKubectlCommandWithArgs(pluginHandler PluginHandler, args []string
 // and performing executable filename lookups to search
 // for valid plugin files, and execute found plugins.
 type PluginHandler interface {
-	// exists at the given filename, or a boolean false.
-	// Lookup will iterate over a list of given prefixes
-	// in order to recognize valid plugin filenames.
-	// The first filepath to match a prefix is returned.
-	Lookup(filename string) (string, bool)
+	// Lookup receives a potential filename and returns
+	// a full or relative path to an executable, if one
+	// exists at the given filename, or an error.
+	Lookup(filename string) (string, error)
 	// Execute receives an executable's filepath, a slice
 	// of arguments, and a slice of environment variables
 	// to relay to the executable.
 	Execute(executablePath string, cmdArgs, environment []string) error
 }
 
-// DefaultPluginHandler implements PluginHandler
-type DefaultPluginHandler struct {
-	ValidPrefixes []string
-}
-
-// NewDefaultPluginHandler instantiates the DefaultPluginHandler with a list of
-// given filename prefixes used to identify valid plugin filenames.
-func NewDefaultPluginHandler(validPrefixes []string) *DefaultPluginHandler {
-	return &DefaultPluginHandler{
-		ValidPrefixes: validPrefixes,
-	}
-}
+type defaultPluginHandler struct{}
 
 // Lookup implements PluginHandler
-func (h *DefaultPluginHandler) Lookup(filename string) (string, bool) {
-	for _, prefix := range h.ValidPrefixes {
-		path, err := exec.LookPath(fmt.Sprintf("%s-%s", prefix, filename))
-		if err != nil || len(path) == 0 {
-			continue
-		}
-		return path, true
+func (h *defaultPluginHandler) Lookup(filename string) (string, error) {
+	// if on Windows, append the "exe" extension
+	// to the filename that we are looking up.
+	if runtime.GOOS == "windows" {
+		filename = filename + ".exe"
 	}
 
-	return "", false
+	return exec.LookPath(filename)
 }
 
 // Execute implements PluginHandler
-func (h *DefaultPluginHandler) Execute(executablePath string, cmdArgs, environment []string) error {
+func (h *defaultPluginHandler) Execute(executablePath string, cmdArgs, environment []string) error {
 	return syscall.Exec(executablePath, cmdArgs, environment)
 }
 
-// HandlePluginCommand receives a pluginHandler and command-line arguments and attempts to find
-// a plugin executable on the PATH that satisfies the given arguments.
-func HandlePluginCommand(pluginHandler PluginHandler, cmdArgs []string) error {
+func handleEndpointExtensions(pluginHandler PluginHandler, cmdArgs []string) error {
 	remainingArgs := []string{} // all "non-flag" arguments
 
 	for idx := range cmdArgs {
@@ -383,8 +365,8 @@ func HandlePluginCommand(pluginHandler PluginHandler, cmdArgs []string) error {
 
 	// attempt to find binary, starting at longest possible name with given cmdArgs
 	for len(remainingArgs) > 0 {
-		path, found := pluginHandler.Lookup(strings.Join(remainingArgs, "-"))
-		if !found {
+		path, err := pluginHandler.Lookup(fmt.Sprintf("kubectl-%s", strings.Join(remainingArgs, "-")))
+		if err != nil || len(path) == 0 {
 			remainingArgs = remainingArgs[:len(remainingArgs)-1]
 			continue
 		}
@@ -431,15 +413,15 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 	}
 
 	flags := cmds.PersistentFlags()
-	flags.SetNormalizeFunc(cliflag.WarnWordSepNormalizeFunc) // Warn for "_" flags
+	flags.SetNormalizeFunc(utilflag.WarnWordSepNormalizeFunc) // Warn for "_" flags
 
 	// Normalize all flags that are coming from other packages or pre-configurations
 	// a.k.a. change all "_" to "-". e.g. glog package
-	flags.SetNormalizeFunc(cliflag.WordSepNormalizeFunc)
+	flags.SetNormalizeFunc(utilflag.WordSepNormalizeFunc)
 
 	addProfilingFlags(flags)
 
-	kubeConfigFlags := genericclioptions.NewConfigFlags(true).WithDeprecatedPasswordFlag()
+	kubeConfigFlags := genericclioptions.NewConfigFlags()
 	kubeConfigFlags.AddFlags(flags)
 	matchVersionKubeConfigFlags := cmdutil.NewMatchVersionFlags(kubeConfigFlags)
 	matchVersionKubeConfigFlags.AddFlags(cmds.PersistentFlags())
@@ -456,7 +438,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 	i18n.LoadTranslations("kubectl", nil)
 
 	// From this point and forward we get warnings on flags that contain "_" separators
-	cmds.SetGlobalNormalizationFunc(cliflag.WarnWordSepNormalizeFunc)
+	cmds.SetGlobalNormalizationFunc(utilflag.WarnWordSepNormalizeFunc)
 
 	ioStreams := genericclioptions.IOStreams{In: in, Out: out, ErrOut: err}
 
@@ -468,6 +450,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 				expose.NewCmdExposeService(f, ioStreams),
 				run.NewCmdRun(f, ioStreams),
 				set.NewCmdSet(f, ioStreams),
+				deprecatedAlias("run-container", run.NewCmdRun(f, ioStreams)),
 			},
 		},
 		{
@@ -522,7 +505,6 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 				replace.NewCmdReplace(f, ioStreams),
 				wait.NewCmdWait(f, ioStreams),
 				convert.NewCmdConvert(f, ioStreams),
-				kustomize.NewCmdKustomize(ioStreams),
 			},
 		},
 		{
@@ -546,7 +528,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 
 	templates.ActsAsRootCommand(cmds, filters, groups...)
 
-	for name, completion := range bashCompletionFlags {
+	for name, completion := range bash_completion_flags {
 		if cmds.Flag(name) != nil {
 			if cmds.Flag(name).Annotations == nil {
 				cmds.Flag(name).Annotations = map[string][]string{}
@@ -562,8 +544,8 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 	cmds.AddCommand(cmdconfig.NewCmdConfig(f, clientcmd.NewDefaultPathOptions(), ioStreams))
 	cmds.AddCommand(plugin.NewCmdPlugin(f, ioStreams))
 	cmds.AddCommand(version.NewCmdVersion(f, ioStreams))
-	cmds.AddCommand(apiresources.NewCmdAPIVersions(f, ioStreams))
-	cmds.AddCommand(apiresources.NewCmdAPIResources(f, ioStreams))
+	cmds.AddCommand(apiresources.NewCmdApiVersions(f, ioStreams))
+	cmds.AddCommand(apiresources.NewCmdApiResources(f, ioStreams))
 	cmds.AddCommand(options.NewCmdOptions(ioStreams.Out))
 
 	return cmds

@@ -26,13 +26,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
-	jsonpatch "github.com/evanphx/json-patch"
+	"github.com/emicklei/go-restful-swagger12"
 	"github.com/go-openapi/spec"
+	"github.com/golang/glog"
 	"github.com/pborman/uuid"
-	"k8s.io/klog"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -60,10 +59,10 @@ import (
 	"k8s.io/apiserver/pkg/server/routes"
 	serverstore "k8s.io/apiserver/pkg/server/storage"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/apiserver/pkg/util/logs"
 	"k8s.io/client-go/informers"
 	restclient "k8s.io/client-go/rest"
 	certutil "k8s.io/client-go/util/cert"
-	"k8s.io/component-base/logs"
 	openapicommon "k8s.io/kube-openapi/pkg/common"
 
 	// install apis
@@ -102,6 +101,7 @@ type Config struct {
 	AdmissionControl      admission.Interface
 	CorsAllowedOriginList []string
 
+	EnableSwaggerUI bool
 	EnableIndex     bool
 	EnableProfiling bool
 	EnableDiscovery bool
@@ -145,6 +145,8 @@ type Config struct {
 	Serializer runtime.NegotiatedSerializer
 	// OpenAPIConfig will be used in generating OpenAPI spec. This is nil by default. Use DefaultOpenAPIConfig for "working" defaults.
 	OpenAPIConfig *openapicommon.Config
+	// SwaggerConfig will be used in generating Swagger spec. This is nil by default. Use DefaultSwaggerConfig for "working" defaults.
+	SwaggerConfig *swagger.Config
 
 	// RESTOptionsGetter is used to construct RESTStorage types via the generic registry.
 	RESTOptionsGetter genericregistry.RESTOptionsGetter
@@ -155,13 +157,6 @@ type Config struct {
 	// If specified, long running requests such as watch will be allocated a random timeout between this value, and
 	// twice this value.  Note that it is up to the request handlers to ignore or honor this timeout. In seconds.
 	MinRequestTimeout int
-	// The limit on the total size increase all "copy" operations in a json
-	// patch may cause.
-	// This affects all places that applies json patch in the binary.
-	JSONPatchMaxCopyBytes int64
-	// The limit on the request body size that would be accepted and decoded in a write request.
-	// 0 means no limit.
-	MaxRequestBodyBytes int64
 	// MaxRequestsInFlight is the maximum number of parallel non-long-running requests. Every further
 	// request has to wait. Applies only to non-mutating requests.
 	MaxRequestsInFlight int
@@ -232,9 +227,6 @@ type SecureServingInfo struct {
 }
 
 type AuthenticationInfo struct {
-	// APIAudiences is a list of identifier that the API identifies as. This is
-	// used by some authenticators to validate audience bound credentials.
-	APIAudiences authenticator.Audiences
 	// Authenticator determines which subject is making the request
 	Authenticator authenticator.Request
 	// SupportsBasicAuth indicates that's at least one Authenticator supports basic auth
@@ -252,36 +244,20 @@ type AuthorizationInfo struct {
 // NewConfig returns a Config struct with the default values
 func NewConfig(codecs serializer.CodecFactory) *Config {
 	return &Config{
-		Serializer:                  codecs,
-		BuildHandlerChainFunc:       DefaultBuildHandlerChain,
-		HandlerChainWaitGroup:       new(utilwaitgroup.SafeWaitGroup),
-		LegacyAPIGroupPrefixes:      sets.NewString(DefaultLegacyAPIPrefix),
-		DisabledPostStartHooks:      sets.NewString(),
-		HealthzChecks:               []healthz.HealthzChecker{healthz.PingHealthz, healthz.LogHealthz},
-		EnableIndex:                 true,
-		EnableDiscovery:             true,
-		EnableProfiling:             true,
-		EnableMetrics:               true,
-		MaxRequestsInFlight:         400,
-		MaxMutatingRequestsInFlight: 200,
-		RequestTimeout:              time.Duration(60) * time.Second,
-		MinRequestTimeout:           1800,
-		// 10MB is the recommended maximum client request size in bytes
-		// the etcd server should accept. See
-		// https://github.com/etcd-io/etcd/blob/release-3.3/etcdserver/server.go#L90.
-		// A request body might be encoded in json, and is converted to
-		// proto when persisted in etcd. Assuming the upper bound of
-		// the size ratio is 10:1, we set 100MB as the largest size
-		// increase the "copy" operations in a json patch may cause.
-		JSONPatchMaxCopyBytes: int64(100 * 1024 * 1024),
-		// 10MB is the recommended maximum client request size in bytes
-		// the etcd server should accept. See
-		// https://github.com/etcd-io/etcd/blob/release-3.3/etcdserver/server.go#L90.
-		// A request body might be encoded in json, and is converted to
-		// proto when persisted in etcd. Assuming the upper bound of
-		// the size ratio is 10:1, we set 100MB as the largest request
-		// body size to be accepted and decoded in a write request.
-		MaxRequestBodyBytes:          int64(100 * 1024 * 1024),
+		Serializer:                   codecs,
+		BuildHandlerChainFunc:        DefaultBuildHandlerChain,
+		HandlerChainWaitGroup:        new(utilwaitgroup.SafeWaitGroup),
+		LegacyAPIGroupPrefixes:       sets.NewString(DefaultLegacyAPIPrefix),
+		DisabledPostStartHooks:       sets.NewString(),
+		HealthzChecks:                []healthz.HealthzChecker{healthz.PingHealthz, healthz.LogHealthz},
+		EnableIndex:                  true,
+		EnableDiscovery:              true,
+		EnableProfiling:              true,
+		EnableMetrics:                true,
+		MaxRequestsInFlight:          400,
+		MaxMutatingRequestsInFlight:  200,
+		RequestTimeout:               time.Duration(60) * time.Second,
+		MinRequestTimeout:            1800,
 		EnableAPIResponseCompression: utilfeature.DefaultFeatureGate.Enabled(features.APIResponseCompression),
 
 		// Default to treating watch as a long-running operation
@@ -300,7 +276,7 @@ func NewRecommendedConfig(codecs serializer.CodecFactory) *RecommendedConfig {
 func DefaultOpenAPIConfig(getDefinitions openapicommon.GetOpenAPIDefinitions, defNamer *apiopenapi.DefinitionNamer) *openapicommon.Config {
 	return &openapicommon.Config{
 		ProtocolList:   []string{"https"},
-		IgnorePrefixes: []string{},
+		IgnorePrefixes: []string{"/swaggerapi"},
 		Info: &spec.Info{
 			InfoProps: spec.InfoProps{
 				Title: "Generic API Server",
@@ -314,6 +290,23 @@ func DefaultOpenAPIConfig(getDefinitions openapicommon.GetOpenAPIDefinitions, de
 		GetOperationIDAndTags: apiopenapi.GetOperationIDAndTags,
 		GetDefinitionName:     defNamer.GetDefinitionName,
 		GetDefinitions:        getDefinitions,
+	}
+}
+
+// DefaultSwaggerConfig returns a default configuration without WebServiceURL and
+// WebServices set.
+func DefaultSwaggerConfig() *swagger.Config {
+	return &swagger.Config{
+		ApiPath:         "/swaggerapi",
+		SwaggerPath:     "/swaggerui/",
+		SwaggerFilePath: "/swagger-ui/",
+		SchemaFormatHandler: func(typeName string) string {
+			switch typeName {
+			case "metav1.Time", "*metav1.Time":
+				return "date-time"
+			}
+			return ""
+		},
 	}
 }
 
@@ -362,11 +355,11 @@ func (c *Config) Complete(informers informers.SharedInformerFactory) CompletedCo
 	// if there is no port, and we listen on one securely, use that one
 	if _, _, err := net.SplitHostPort(c.ExternalAddress); err != nil {
 		if c.SecureServing == nil {
-			klog.Fatalf("cannot derive external address port without listening on a secure port.")
+			glog.Fatalf("cannot derive external address port without listening on a secure port.")
 		}
 		_, port, err := c.SecureServing.HostPort()
 		if err != nil {
-			klog.Fatalf("cannot derive external address from the secure port: %v", err)
+			glog.Fatalf("cannot derive external address from the secure port: %v", err)
 		}
 		c.ExternalAddress = net.JoinHostPort(c.ExternalAddress, strconv.Itoa(port))
 	}
@@ -405,6 +398,13 @@ func (c *Config) Complete(informers informers.SharedInformerFactory) CompletedCo
 			} else {
 				c.OpenAPIConfig.Info.Version = "unversioned"
 			}
+		}
+	}
+	if c.SwaggerConfig != nil && len(c.SwaggerConfig.WebServicesUrl) == 0 {
+		if c.SecureServing != nil {
+			c.SwaggerConfig.WebServicesUrl = "https://" + c.ExternalAddress
+		} else {
+			c.SwaggerConfig.WebServicesUrl = "http://" + c.ExternalAddress
 		}
 	}
 	if c.DiscoveryAddresses == nil {
@@ -463,6 +463,7 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 
 		listedPathProvider: apiServerHandler,
 
+		swaggerConfig: c.SwaggerConfig,
 		openAPIConfig: c.OpenAPIConfig,
 
 		postStartHooks:         map[string]postStartHookEntry{},
@@ -474,20 +475,6 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 		DiscoveryGroupManager: discovery.NewRootAPIsHandler(c.DiscoveryAddresses, c.Serializer),
 
 		enableAPIResponseCompression: c.EnableAPIResponseCompression,
-		maxRequestBodyBytes:          c.MaxRequestBodyBytes,
-	}
-
-	for {
-		if c.JSONPatchMaxCopyBytes <= 0 {
-			break
-		}
-		existing := atomic.LoadInt64(&jsonpatch.AccumulatedCopySizeLimit)
-		if existing > 0 && existing < c.JSONPatchMaxCopyBytes {
-			break
-		}
-		if atomic.CompareAndSwapInt64(&jsonpatch.AccumulatedCopySizeLimit, existing, c.JSONPatchMaxCopyBytes) {
-			break
-		}
 	}
 
 	for k, v := range delegationTarget.PostStartHooks() {
@@ -547,7 +534,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 	handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyChecker, c.LongRunningFunc)
 	failedHandler := genericapifilters.Unauthorized(c.Serializer, c.Authentication.SupportsBasicAuth)
 	failedHandler = genericapifilters.WithFailedAuthenticationAudit(failedHandler, c.AuditBackend, c.AuditPolicyChecker)
-	handler = genericapifilters.WithAuthentication(handler, c.Authentication.Authenticator, failedHandler, c.Authentication.APIAudiences)
+	handler = genericapifilters.WithAuthentication(handler, c.Authentication.Authenticator, failedHandler)
 	handler = genericfilters.WithCORS(handler, c.CorsAllowedOriginList, nil, nil, nil, "true")
 	handler = genericfilters.WithTimeoutForNonLongRunningRequests(handler, c.LongRunningFunc, c.RequestTimeout)
 	handler = genericfilters.WithWaitGroup(handler, c.LongRunningFunc, c.HandlerChainWaitGroup)
@@ -559,6 +546,9 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 func installAPI(s *GenericAPIServer, c *Config) {
 	if c.EnableIndex {
 		routes.Index{}.Install(s.listedPathProvider, s.Handler.NonGoRestfulMux)
+	}
+	if c.SwaggerConfig != nil && c.EnableSwaggerUI {
+		routes.SwaggerUI{}.Install(s.Handler.NonGoRestfulMux)
 	}
 	if c.EnableProfiling {
 		routes.Profiling{}.Install(s.Handler.NonGoRestfulMux)
@@ -614,18 +604,9 @@ func (s *SecureServingInfo) HostPort() (string, int, error) {
 }
 
 // AuthorizeClientBearerToken wraps the authenticator and authorizer in loopback authentication logic
-// if the loopback client config is specified AND it has a bearer token. Note that if either authn or
-// authz is nil, this function won't add a token authenticator or authorizer.
+// if the loopback client config is specified AND it has a bearer token.
 func AuthorizeClientBearerToken(loopback *restclient.Config, authn *AuthenticationInfo, authz *AuthorizationInfo) {
-	if loopback == nil || len(loopback.BearerToken) == 0 {
-		return
-	}
-	if authn == nil || authz == nil {
-		// prevent nil pointer panic
-	}
-	if authn.Authenticator == nil || authz.Authorizer == nil {
-		// authenticator or authorizer might be nil if we want to bypass authz/authn
-		// and we also do nothing in this case.
+	if loopback == nil || authn == nil || authz == nil || authn.Authenticator == nil && authz.Authorizer == nil || len(loopback.BearerToken) == 0 {
 		return
 	}
 

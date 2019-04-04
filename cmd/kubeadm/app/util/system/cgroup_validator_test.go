@@ -28,6 +28,7 @@ func TestValidateCgroupSubsystem(t *testing.T) {
 	}
 	cgroupSpec := []string{"system1", "system2"}
 	for desc, test := range map[string]struct {
+		cgroupSpec []string
 		subsystems []string
 		err        bool
 	}{
@@ -44,13 +45,12 @@ func TestValidateCgroupSubsystem(t *testing.T) {
 			err:        false,
 		},
 	} {
-		t.Run(desc, func(t *testing.T) {
-			err := v.validateCgroupSubsystems(cgroupSpec, test.subsystems)
-			if !test.err {
-				assert.Nil(t, err, "%q: Expect error not to occur with cgroup", desc)
-			} else {
-				assert.NotNil(t, err, "%q: Expect error to occur with docker info", desc)
-			}
-		})
+		err := v.validateCgroupSubsystems(cgroupSpec, test.subsystems)
+		if !test.err {
+			assert.Nil(t, err, "%q: Expect error not to occur with cgroup", desc)
+		} else {
+			assert.NotNil(t, err, "%q: Expect error to occur with docker info", desc)
+		}
+
 	}
 }

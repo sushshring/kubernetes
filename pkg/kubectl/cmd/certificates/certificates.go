@@ -27,8 +27,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/printers"
-	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/cli-runtime/pkg/genericclioptions/printers"
+	"k8s.io/cli-runtime/pkg/genericclioptions/resource"
 	certificatesv1beta1client "k8s.io/client-go/kubernetes/typed/certificates/v1beta1"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/scheme"
@@ -68,14 +68,6 @@ type CertificateOptions struct {
 	genericclioptions.IOStreams
 }
 
-// NewCertificateOptions creates the options for certificate
-func NewCertificateOptions(ioStreams genericclioptions.IOStreams) *CertificateOptions {
-	return &CertificateOptions{
-		PrintFlags: genericclioptions.NewPrintFlags("approved").WithTypeSetter(scheme.Scheme),
-		IOStreams:  ioStreams,
-	}
-}
-
 func (o *CertificateOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []string) error {
 	o.csrNames = args
 	o.outputStyle = cmdutil.GetFlagString(cmd, "output")
@@ -104,15 +96,17 @@ func (o *CertificateOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, arg
 }
 
 func (o *CertificateOptions) Validate() error {
-	if len(o.csrNames) < 1 && cmdutil.IsFilenameSliceEmpty(o.Filenames, o.Kustomize) {
+	if len(o.csrNames) < 1 && cmdutil.IsFilenameSliceEmpty(o.Filenames) {
 		return fmt.Errorf("one or more CSRs must be specified as <name> or -f <filename>")
 	}
 	return nil
 }
 
 func NewCmdCertificateApprove(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
-	o := NewCertificateOptions(ioStreams)
-
+	options := CertificateOptions{
+		PrintFlags: genericclioptions.NewPrintFlags("approved").WithTypeSetter(scheme.Scheme),
+		IOStreams:  ioStreams,
+	}
 	cmd := &cobra.Command{
 		Use:                   "approve (-f FILENAME | NAME)",
 		DisableFlagsInUseLine: true,
@@ -130,16 +124,16 @@ func NewCmdCertificateApprove(f cmdutil.Factory, ioStreams genericclioptions.IOS
 		signed certificate can do.
 		`),
 		Run: func(cmd *cobra.Command, args []string) {
-			cmdutil.CheckErr(o.Complete(f, cmd, args))
-			cmdutil.CheckErr(o.Validate())
-			cmdutil.CheckErr(o.RunCertificateApprove(cmdutil.GetFlagBool(cmd, "force")))
+			cmdutil.CheckErr(options.Complete(f, cmd, args))
+			cmdutil.CheckErr(options.Validate())
+			cmdutil.CheckErr(options.RunCertificateApprove(cmdutil.GetFlagBool(cmd, "force")))
 		},
 	}
 
-	o.PrintFlags.AddFlags(cmd)
+	options.PrintFlags.AddFlags(cmd)
 
 	cmd.Flags().Bool("force", false, "Update the CSR even if it is already approved.")
-	cmdutil.AddFilenameOptionFlags(cmd, &o.FilenameOptions, "identifying the resource to update")
+	cmdutil.AddFilenameOptionFlags(cmd, &options.FilenameOptions, "identifying the resource to update")
 
 	return cmd
 }
@@ -166,8 +160,10 @@ func (o *CertificateOptions) RunCertificateApprove(force bool) error {
 }
 
 func NewCmdCertificateDeny(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
-	o := NewCertificateOptions(ioStreams)
-
+	options := CertificateOptions{
+		PrintFlags: genericclioptions.NewPrintFlags("denied").WithTypeSetter(scheme.Scheme),
+		IOStreams:  ioStreams,
+	}
 	cmd := &cobra.Command{
 		Use:                   "deny (-f FILENAME | NAME)",
 		DisableFlagsInUseLine: true,
@@ -180,16 +176,16 @@ func NewCmdCertificateDeny(f cmdutil.Factory, ioStreams genericclioptions.IOStre
 		not to issue a certificate to the requestor.
 		`),
 		Run: func(cmd *cobra.Command, args []string) {
-			cmdutil.CheckErr(o.Complete(f, cmd, args))
-			cmdutil.CheckErr(o.Validate())
-			cmdutil.CheckErr(o.RunCertificateDeny(cmdutil.GetFlagBool(cmd, "force")))
+			cmdutil.CheckErr(options.Complete(f, cmd, args))
+			cmdutil.CheckErr(options.Validate())
+			cmdutil.CheckErr(options.RunCertificateDeny(cmdutil.GetFlagBool(cmd, "force")))
 		},
 	}
 
-	o.PrintFlags.AddFlags(cmd)
+	options.PrintFlags.AddFlags(cmd)
 
 	cmd.Flags().Bool("force", false, "Update the CSR even if it is already denied.")
-	cmdutil.AddFilenameOptionFlags(cmd, &o.FilenameOptions, "identifying the resource to update")
+	cmdutil.AddFilenameOptionFlags(cmd, &options.FilenameOptions, "identifying the resource to update")
 
 	return cmd
 }
@@ -215,13 +211,13 @@ func (o *CertificateOptions) RunCertificateDeny(force bool) error {
 	})
 }
 
-func (o *CertificateOptions) modifyCertificateCondition(builder *resource.Builder, clientSet certificatesv1beta1client.CertificatesV1beta1Interface, force bool, modify func(csr *certificatesv1beta1.CertificateSigningRequest) (*certificatesv1beta1.CertificateSigningRequest, bool)) error {
+func (options *CertificateOptions) modifyCertificateCondition(builder *resource.Builder, clientSet certificatesv1beta1client.CertificatesV1beta1Interface, force bool, modify func(csr *certificatesv1beta1.CertificateSigningRequest) (*certificatesv1beta1.CertificateSigningRequest, bool)) error {
 	var found int
 	r := builder.
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
 		ContinueOnError().
-		FilenameParam(false, &o.FilenameOptions).
-		ResourceNames("certificatesigningrequest", o.csrNames...).
+		FilenameParam(false, &options.FilenameOptions).
+		ResourceNames("certificatesigningrequest", options.csrNames...).
 		RequireObject(true).
 		Flatten().
 		Latest().
@@ -249,10 +245,10 @@ func (o *CertificateOptions) modifyCertificateCondition(builder *resource.Builde
 		}
 		found++
 
-		return o.PrintObj(info.Object, o.Out)
+		return options.PrintObj(cmdutil.AsDefaultVersionedOrOriginal(info.Object, info.Mapping), options.Out)
 	})
 	if found == 0 {
-		fmt.Fprintf(o.Out, "No resources found\n")
+		fmt.Fprintf(options.Out, "No resources found\n")
 	}
 	return err
 }

@@ -6,14 +6,13 @@ Summary: Container Cluster Manager - Kubernetes Node Agent
 
 URL: https://kubernetes.io
 
-Requires: conntrack
-Requires: ebtables
-Requires: ethtool
-Requires: iproute
 Requires: iptables >= 1.4.21
-Requires: kubernetes-cni >= 0.7.5
+Requires: kubernetes-cni >= 0.5.1
 Requires: socat
 Requires: util-linux
+Requires: ethtool
+Requires: iproute
+Requires: ebtables
 
 %description
 The node agent of Kubernetes, the container cluster manager.

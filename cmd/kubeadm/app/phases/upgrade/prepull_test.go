@@ -17,12 +17,9 @@ limitations under the License.
 package upgrade
 
 import (
+	"fmt"
 	"testing"
 	"time"
-
-	"github.com/pkg/errors"
-
-	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	//"k8s.io/apimachinery/pkg/util/version"
 )
 
@@ -35,7 +32,7 @@ func NewFailedCreatePrepuller() Prepuller {
 
 func (p *failedCreatePrepuller) CreateFunc(component string) error {
 	if component == "kube-controller-manager" {
-		return errors.New("boo")
+		return fmt.Errorf("boo")
 	}
 	return nil
 }
@@ -80,7 +77,7 @@ func (p *failedDeletePrepuller) WaitFunc(component string) {}
 
 func (p *failedDeletePrepuller) DeleteFunc(component string) error {
 	if component == "kube-scheduler" {
-		return errors.New("boo")
+		return fmt.Errorf("boo")
 	}
 	return nil
 }
@@ -108,31 +105,26 @@ func (p *goodPrepuller) DeleteFunc(component string) error {
 
 func TestPrepullImagesInParallel(t *testing.T) {
 	tests := []struct {
-		name        string
 		p           Prepuller
 		timeout     time.Duration
 		expectedErr bool
 	}{
-		{
-			name:        "should error out; create failed",
+		{ // should error out; create failed
 			p:           NewFailedCreatePrepuller(),
 			timeout:     10 * time.Second,
 			expectedErr: true,
 		},
-		{
-			name:        "should error out; timeout exceeded",
+		{ // should error out; timeout exceeded
 			p:           NewForeverWaitPrepuller(),
 			timeout:     10 * time.Second,
 			expectedErr: true,
 		},
-		{
-			name:        "should error out; delete failed",
+		{ // should error out; delete failed
 			p:           NewFailedDeletePrepuller(),
 			timeout:     10 * time.Second,
 			expectedErr: true,
 		},
-		{
-			name:        "should work just fine",
+		{ // should work just fine
 			p:           NewGoodPrepuller(),
 			timeout:     10 * time.Second,
 			expectedErr: false,
@@ -140,15 +132,14 @@ func TestPrepullImagesInParallel(t *testing.T) {
 	}
 
 	for _, rt := range tests {
-		t.Run(rt.name, func(t *testing.T) {
-			actualErr := PrepullImagesInParallel(rt.p, rt.timeout, append(constants.ControlPlaneComponents, constants.Etcd))
-			if (actualErr != nil) != rt.expectedErr {
-				t.Errorf(
-					"failed TestPrepullImagesInParallel\n\texpected error: %t\n\tgot: %t",
-					rt.expectedErr,
-					(actualErr != nil),
-				)
-			}
-		})
+
+		actualErr := PrepullImagesInParallel(rt.p, rt.timeout)
+		if (actualErr != nil) != rt.expectedErr {
+			t.Errorf(
+				"failed TestPrepullImagesInParallel\n\texpected error: %t\n\tgot: %t",
+				rt.expectedErr,
+				(actualErr != nil),
+			)
+		}
 	}
 }

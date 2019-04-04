@@ -5,7 +5,6 @@ go_library(
     srcs = [
         "decode.go",
         "defaults.go",
-        "dep_service_ids.go",
         "doc.go",
         "endpoints.go",
         "v3model.go",

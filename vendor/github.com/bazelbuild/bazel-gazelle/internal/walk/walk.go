@@ -28,26 +28,6 @@ import (
 	"github.com/bazelbuild/bazel-gazelle/internal/rule"
 )
 
-// Mode determines which directories Walk visits and which directories
-// should be updated.
-type Mode int
-
-const (
-	// In VisitAllUpdateSubdirsMode, Walk visits every directory in the
-	// repository. The directories given to Walk and their subdirectories are
-	// updated.
-	VisitAllUpdateSubdirsMode Mode = iota
-
-	// In VisitAllUpdateDirsMode, Walk visits every directory in the repository.
-	// Only the directories given to Walk are updated (not their subdirectories).
-	VisitAllUpdateDirsMode
-
-	// In UpdateDirsMode, Walk only visits and updates directories given to Walk.
-	// Build files in parent directories are read in order to produce a complete
-	// configuration, but the callback is not called for parent directories.
-	UpdateDirsMode
-)
-
 // WalkFunc is a callback called by Walk in each visited directory.
 //
 // dir is the absolute file system path to the directory being visited.
@@ -77,10 +57,11 @@ type WalkFunc func(dir, rel string, c *config.Config, update bool, f *rule.File,
 //
 // Walk calls the Configure method on each configuration extension in cexts
 // in each directory in pre-order, whether a build file is present in the
-// directory or not. cexts must contain a walk.Configurer.
+// directory or not.
 //
 // Walk calls the callback wf in post-order.
-func Walk(c *config.Config, cexts []config.Configurer, dirs []string, mode Mode, wf WalkFunc) {
+func Walk(c *config.Config, cexts []config.Configurer, wf WalkFunc) {
+	cexts = append(cexts, &walkConfigurer{})
 	knownDirectives := make(map[string]bool)
 	for _, cext := range cexts {
 		for _, d := range cext.KnownDirectives() {
@@ -88,13 +69,16 @@ func Walk(c *config.Config, cexts []config.Configurer, dirs []string, mode Mode,
 		}
 	}
 
-	symlinks := symlinkResolver{visited: []string{c.RepoRoot}}
-
-	updateRels := buildUpdateRelMap(c.RepoRoot, dirs)
+	updateRels := buildUpdateRels(c.RepoRoot, c.Dirs)
+	symlinks := symlinkResolver{root: c.RepoRoot, visited: []string{c.RepoRoot}}
 
 	var visit func(*config.Config, string, string, bool)
-	visit = func(c *config.Config, dir, rel string, updateParent bool) {
+	visit = func(c *config.Config, dir, rel string, isUpdateDir bool) {
 		haveError := false
+
+		if !isUpdateDir {
+			isUpdateDir = shouldUpdateDir(rel, updateRels)
+		}
 
 		// TODO: OPT: ReadDir stats all the files, which is slow. We just care about
 		// names and modes, so we should use something like
@@ -118,10 +102,10 @@ func Walk(c *config.Config, cexts []config.Configurer, dirs []string, mode Mode,
 		for _, fi := range files {
 			base := fi.Name()
 			switch {
-			case base == "" || base[0] == '.' || base[0] == '_' || wc.isExcluded(rel, base):
+			case base == "" || base[0] == '.' || base[0] == '_' || wc.isExcluded(base):
 				continue
 
-			case fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 && symlinks.follow(c, dir, rel, base):
+			case fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 && symlinks.follow(dir, base):
 				subdirs = append(subdirs, base)
 
 			default:
@@ -129,75 +113,45 @@ func Walk(c *config.Config, cexts []config.Configurer, dirs []string, mode Mode,
 			}
 		}
 
-		shouldUpdate := shouldUpdate(rel, mode, updateParent, updateRels)
 		for _, sub := range subdirs {
-			if subRel := path.Join(rel, sub); shouldVisit(subRel, mode, updateRels) {
-				visit(c, filepath.Join(dir, sub), subRel, shouldUpdate)
-			}
+			visit(c, filepath.Join(dir, sub), path.Join(rel, sub), isUpdateDir)
 		}
 
-		update := !haveError && !wc.ignore && shouldUpdate
-		if shouldCall(rel, mode, updateRels) {
-			genFiles := findGenFiles(wc, f)
-			wf(dir, rel, c, update, f, subdirs, regularFiles, genFiles)
-		}
+		genFiles := findGenFiles(wc, f)
+		update := !haveError && isUpdateDir && !wc.ignore
+		wf(dir, rel, c, update, f, subdirs, regularFiles, genFiles)
 	}
 	visit(c, c.RepoRoot, "", false)
 }
 
-// buildUpdateRelMap builds a table of prefixes, used to determine which
-// directories to update and visit.
-//
-// root and dirs must be absolute, canonical file paths. Each entry in dirs
-// must be a subdirectory of root. The caller is responsible for checking this.
-//
-// buildUpdateRelMap returns a map from slash-separated paths relative to the
-// root directory ("" for the root itself) to a boolean indicating whether
-// the directory should be updated.
-func buildUpdateRelMap(root string, dirs []string) map[string]bool {
-	relMap := make(map[string]bool)
+// buildUpdateRels builds a list of relative paths from the repository root
+// directory (passed as an absolute file path) to directories that Gazelle
+// may update. The relative paths are slash-separated. "" represents the
+// root directory itself.
+func buildUpdateRels(root string, dirs []string) []string {
+	var updateRels []string
 	for _, dir := range dirs {
-		rel, _ := filepath.Rel(root, dir)
+		rel, err := filepath.Rel(root, dir)
+		if err != nil {
+			// This should have been verified when c was built.
+			log.Panicf("%s: not a subdirectory of repository root %q", dir, root)
+		}
 		rel = filepath.ToSlash(rel)
-		if rel == "." {
+		if rel == "." || rel == "/" {
 			rel = ""
 		}
+		updateRels = append(updateRels, rel)
+	}
+	return updateRels
+}
 
-		i := 0
-		for {
-			next := strings.IndexByte(rel[i:], '/') + i
-			if next-i < 0 {
-				relMap[rel] = true
-				break
-			}
-			prefix := rel[:next]
-			relMap[prefix] = relMap[prefix] // set to false if not present
-			i = next + 1
+func shouldUpdateDir(rel string, updateRels []string) bool {
+	for _, r := range updateRels {
+		if pathtools.HasPrefix(rel, r) {
+			return true
 		}
 	}
-	return relMap
-}
-
-// shouldCall returns true if Walk should call the callback in the
-// directory rel.
-func shouldCall(rel string, mode Mode, updateRels map[string]bool) bool {
-	return mode != UpdateDirsMode || updateRels[rel]
-}
-
-// shouldUpdate returns true if Walk should pass true to the callback's update
-// parameter in the directory rel. This indicates the build file should be
-// updated.
-func shouldUpdate(rel string, mode Mode, updateParent bool, updateRels map[string]bool) bool {
-	return mode == VisitAllUpdateSubdirsMode && updateParent || updateRels[rel]
-}
-
-// shouldVisit returns true if Walk should visit the subdirectory rel.
-func shouldVisit(rel string, mode Mode, updateRels map[string]bool) bool {
-	if mode != UpdateDirsMode {
-		return true
-	}
-	_, ok := updateRels[rel]
-	return ok
+	return false
 }
 
 func loadBuildFile(c *config.Config, pkg, dir string, files []os.FileInfo) (*rule.File, error) {
@@ -235,7 +189,7 @@ func configure(cexts []config.Configurer, knownDirectives map[string]bool, c *co
 	return c
 }
 
-func findGenFiles(wc *walkConfig, f *rule.File) []string {
+func findGenFiles(wc walkConfig, f *rule.File) []string {
 	if f == nil {
 		return nil
 	}
@@ -252,7 +206,7 @@ func findGenFiles(wc *walkConfig, f *rule.File) []string {
 
 	var genFiles []string
 	for _, s := range strs {
-		if !wc.isExcluded(f.Pkg, s) {
+		if !wc.isExcluded(s) {
 			genFiles = append(genFiles, s)
 		}
 	}
@@ -260,26 +214,17 @@ func findGenFiles(wc *walkConfig, f *rule.File) []string {
 }
 
 type symlinkResolver struct {
+	root    string
 	visited []string
 }
 
 // Decide if symlink dir/base should be followed.
-func (r *symlinkResolver) follow(c *config.Config, dir, rel, base string) bool {
-	if dir == c.RepoRoot && strings.HasPrefix(base, "bazel-") {
+func (r *symlinkResolver) follow(dir, base string) bool {
+	if dir == r.root && strings.HasPrefix(base, "bazel-") {
 		// Links such as bazel-<workspace>, bazel-out, bazel-genfiles are created by
 		// Bazel to point to internal build directories.
 		return false
 	}
-
-	// See if the user has explicitly directed us to follow the link.
-	wc := getWalkConfig(c)
-	linkRel := path.Join(rel, base)
-	for _, follow := range wc.follow {
-		if linkRel == follow {
-			return true
-		}
-	}
-
 	// See if the symlink points to a tree that has been already visited.
 	fullpath := filepath.Join(dir, base)
 	dest, err := filepath.EvalSymlinks(fullpath)

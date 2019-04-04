@@ -20,24 +20,26 @@ import (
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	"k8s.io/klog"
+
+	"github.com/golang/glog"
+	. "github.com/onsi/gomega"
 )
 
 const (
-	// NVIDIAGPUResourceName is the extended name of the GPU resource since v1.8
+	// GPUResourceName is the extended name of the GPU resource since v1.8
 	// this uses the device plugin mechanism
 	NVIDIAGPUResourceName = "nvidia.com/gpu"
 
-	// GPUDevicePluginDSYAML is the official Google Device Plugin Daemonset NVIDIA GPU manifest for GKE
 	// TODO: Parametrize it by making it a feature in TestFramework.
 	// so we can override the daemonset in other setups (non COS).
+	// GPUDevicePluginDSYAML is the official Google Device Plugin Daemonset NVIDIA GPU manifest for GKE
 	GPUDevicePluginDSYAML = "https://raw.githubusercontent.com/kubernetes/kubernetes/master/cluster/addons/device-plugins/nvidia-gpu/daemonset.yaml"
 )
 
-// NumberOfNVIDIAGPUs returns the number of GPUs advertised by a node
+// TODO make this generic and not linked to COS only
+// NumberOfGPUs returs the number of GPUs advertised by a node
 // This is based on the Device Plugin system and expected to run on a COS based node
 // After the NVIDIA drivers were installed
-// TODO make this generic and not linked to COS only
 func NumberOfNVIDIAGPUs(node *v1.Node) int64 {
 	val, ok := node.Status.Capacity[NVIDIAGPUResourceName]
 
@@ -51,7 +53,7 @@ func NumberOfNVIDIAGPUs(node *v1.Node) int64 {
 // NVIDIADevicePlugin returns the official Google Device Plugin pod for NVIDIA GPU in GKE
 func NVIDIADevicePlugin() *v1.Pod {
 	ds, err := DsFromManifest(GPUDevicePluginDSYAML)
-	ExpectNoError(err)
+	Expect(err).NotTo(HaveOccurred())
 	p := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "device-plugin-nvidia-gpu-" + string(uuid.NewUUID()),
@@ -66,19 +68,18 @@ func NVIDIADevicePlugin() *v1.Pod {
 	return p
 }
 
-// GetGPUDevicePluginImage returns the image of GPU device plugin.
 func GetGPUDevicePluginImage() string {
 	ds, err := DsFromManifest(GPUDevicePluginDSYAML)
 	if err != nil {
-		klog.Errorf("Failed to parse the device plugin image: %v", err)
+		glog.Errorf("Failed to parse the device plugin image: %v", err)
 		return ""
 	}
 	if ds == nil {
-		klog.Errorf("Failed to parse the device plugin image: the extracted DaemonSet is nil")
+		glog.Errorf("Failed to parse the device plugin image: the extracted DaemonSet is nil")
 		return ""
 	}
 	if len(ds.Spec.Template.Spec.Containers) < 1 {
-		klog.Errorf("Failed to parse the device plugin image: cannot extract the container from YAML")
+		glog.Errorf("Failed to parse the device plugin image: cannot extract the container from YAML")
 		return ""
 	}
 	return ds.Spec.Template.Spec.Containers[0].Image

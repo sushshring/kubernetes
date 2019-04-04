@@ -23,13 +23,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/util/mount"
-	"k8s.io/kubernetes/test/utils/harness"
 )
 
-func TestSetUpAt(tt *testing.T) {
-	t := harness.For(tt)
-	defer t.Close()
-
+func TestSetUpAt(t *testing.T) {
 	spec := fakeVolumeSpec()
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -43,7 +39,7 @@ func TestSetUpAt(tt *testing.T) {
 	}
 	mounter := &mount.FakeMounter{}
 
-	plugin, rootDir := testPlugin(t)
+	plugin, rootDir := testPlugin()
 	plugin.unsupportedCommands = []string{"unsupportedCmd"}
 	plugin.runner = fakeRunner(
 		// first call without fsGroup

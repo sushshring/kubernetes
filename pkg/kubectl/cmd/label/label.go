@@ -22,8 +22,8 @@ import (
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch"
+	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	"k8s.io/klog"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,8 +35,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/printers"
-	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/cli-runtime/pkg/genericclioptions/printers"
+	"k8s.io/cli-runtime/pkg/genericclioptions/resource"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/scheme"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
@@ -72,6 +72,7 @@ type LabelOptions struct {
 
 	namespace                    string
 	enforceNamespace             bool
+	includeUninitialized         bool
 	builder                      *resource.Builder
 	unstructuredClientForMapping func(mapping *meta.RESTMapping) (resource.RESTClient, error)
 
@@ -191,6 +192,7 @@ func (o *LabelOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []st
 	if err != nil {
 		return err
 	}
+	o.includeUninitialized = cmdutil.ShouldIncludeUninitialized(cmd, false)
 	o.builder = f.NewBuilder()
 	o.unstructuredClientForMapping = f.UnstructuredClientForMapping
 
@@ -205,7 +207,7 @@ func (o *LabelOptions) Validate() error {
 	if o.all && len(o.fieldSelector) > 0 {
 		return fmt.Errorf("cannot set --all and --field-selector at the same time")
 	}
-	if len(o.resources) < 1 && cmdutil.IsFilenameSliceEmpty(o.FilenameOptions.Filenames, o.FilenameOptions.Kustomize) {
+	if len(o.resources) < 1 && cmdutil.IsFilenameSliceEmpty(o.FilenameOptions.Filenames) {
 		return fmt.Errorf("one or more resources must be specified as <resource> <name> or <resource>/<name>")
 	}
 	if len(o.newLabels) < 1 && len(o.removeLabels) < 1 && !o.list {
@@ -222,6 +224,7 @@ func (o *LabelOptions) RunLabel() error {
 		ContinueOnError().
 		NamespaceParam(o.namespace).DefaultNamespace().
 		FilenameParam(o.enforceNamespace, &o.FilenameOptions).
+		IncludeUninitialized(o.includeUninitialized).
 		Flatten()
 
 	if !o.local {
@@ -285,7 +288,7 @@ func (o *LabelOptions) RunLabel() error {
 				return err
 			}
 			if err := o.Recorder.Record(obj); err != nil {
-				klog.V(4).Infof("error recording current command: %v", err)
+				glog.V(4).Infof("error recording current command: %v", err)
 			}
 			newObj, err := json.Marshal(obj)
 			if err != nil {
@@ -295,7 +298,7 @@ func (o *LabelOptions) RunLabel() error {
 			patchBytes, err := jsonpatch.CreateMergePatch(oldData, newObj)
 			createdPatch := err == nil
 			if err != nil {
-				klog.V(2).Infof("couldn't compute patch: %v", err)
+				glog.V(2).Infof("couldn't compute patch: %v", err)
 			}
 
 			mapping := info.ResourceMapping()
@@ -341,7 +344,8 @@ func (o *LabelOptions) RunLabel() error {
 		if err != nil {
 			return err
 		}
-		return printer.PrintObj(info.Object, o.Out)
+		printer.PrintObj(info.Object, o.Out)
+		return nil
 	})
 }
 

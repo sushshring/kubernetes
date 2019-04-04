@@ -23,7 +23,7 @@ import (
 	"sort"
 	"strings"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -113,7 +113,7 @@ func (dk *BasicDockerKeyring) Add(cfg DockerConfig) {
 		}
 		parsed, err := url.Parse(value)
 		if err != nil {
-			klog.Errorf("Entry %q in dockercfg invalid (%v), ignoring", loc, err)
+			glog.Errorf("Entry %q in dockercfg invalid (%v), ignoring", loc, err)
 			continue
 		}
 
@@ -261,9 +261,11 @@ func (dk *BasicDockerKeyring) Lookup(image string) ([]LazyAuthConfiguration, boo
 	for _, k := range dk.index {
 		// both k and image are schemeless URLs because even though schemes are allowed
 		// in the credential configurations, we remove them in Add.
-		if matched, _ := urlsMatchStr(k, image); matched {
-			ret = append(ret, dk.creds[k]...)
+		if matched, _ := urlsMatchStr(k, image); !matched {
+			continue
 		}
+
+		ret = append(ret, dk.creds[k]...)
 	}
 
 	if len(ret) > 0 {
@@ -286,7 +288,7 @@ func (dk *lazyDockerKeyring) Lookup(image string) ([]LazyAuthConfiguration, bool
 	keyring := &BasicDockerKeyring{}
 
 	for _, p := range dk.Providers {
-		keyring.Add(p.Provide(image))
+		keyring.Add(p.Provide())
 	}
 
 	return keyring.Lookup(image)

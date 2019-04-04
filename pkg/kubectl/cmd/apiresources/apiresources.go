@@ -26,7 +26,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
@@ -52,9 +51,9 @@ var (
 		kubectl api-resources --api-group=extensions`)
 )
 
-// APIResourceOptions is the start of the data required to perform the operation.
-// As new fields are added, add them here instead of referencing the cmd.Flags()
-type APIResourceOptions struct {
+// ApiResourcesOptions is the start of the data required to perform the operation.  As new fields are added, add them here instead of
+// referencing the cmd.Flags()
+type ApiResourcesOptions struct {
 	Output     string
 	APIGroup   string
 	Namespaced bool
@@ -71,16 +70,14 @@ type groupResource struct {
 	APIResource metav1.APIResource
 }
 
-// NewAPIResourceOptions creates the options for APIResource
-func NewAPIResourceOptions(ioStreams genericclioptions.IOStreams) *APIResourceOptions {
-	return &APIResourceOptions{
+func NewAPIResourceOptions(ioStreams genericclioptions.IOStreams) *ApiResourcesOptions {
+	return &ApiResourcesOptions{
 		IOStreams:  ioStreams,
 		Namespaced: true,
 	}
 }
 
-// NewCmdAPIResources creates the `api-resources` command
-func NewCmdAPIResources(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
+func NewCmdApiResources(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
 	o := NewAPIResourceOptions(ioStreams)
 
 	cmd := &cobra.Command{
@@ -89,9 +86,8 @@ func NewCmdAPIResources(f cmdutil.Factory, ioStreams genericclioptions.IOStreams
 		Long:    "Print the supported API resources on the server",
 		Example: apiresourcesExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			cmdutil.CheckErr(o.Complete(cmd, args))
-			cmdutil.CheckErr(o.Validate())
-			cmdutil.CheckErr(o.RunAPIResources(cmd, f))
+			cmdutil.CheckErr(o.Validate(cmd))
+			cmdutil.CheckErr(o.RunApiResources(cmd, f))
 		},
 	}
 
@@ -105,8 +101,7 @@ func NewCmdAPIResources(f cmdutil.Factory, ioStreams genericclioptions.IOStreams
 	return cmd
 }
 
-// Validate checks to the APIResourceOptions to see if there is sufficient information run the command
-func (o *APIResourceOptions) Validate() error {
+func (o *ApiResourcesOptions) Validate(cmd *cobra.Command) error {
 	supportedOutputTypes := sets.NewString("", "wide", "name")
 	if !supportedOutputTypes.Has(o.Output) {
 		return fmt.Errorf("--output %v is not available", o.Output)
@@ -114,16 +109,7 @@ func (o *APIResourceOptions) Validate() error {
 	return nil
 }
 
-// Complete adapts from the command line args and validates them
-func (o *APIResourceOptions) Complete(cmd *cobra.Command, args []string) error {
-	if len(args) != 0 {
-		return cmdutil.UsageErrorf(cmd, "unexpected arguments: %v", args)
-	}
-	return nil
-}
-
-// RunAPIResources does the work
-func (o *APIResourceOptions) RunAPIResources(cmd *cobra.Command, f cmdutil.Factory) error {
+func (o *ApiResourcesOptions) RunApiResources(cmd *cobra.Command, f cmdutil.Factory) error {
 	w := printers.GetNewTabWriter(o.Out)
 	defer w.Flush()
 
@@ -137,10 +123,9 @@ func (o *APIResourceOptions) RunAPIResources(cmd *cobra.Command, f cmdutil.Facto
 		discoveryclient.Invalidate()
 	}
 
-	errs := []error{}
 	lists, err := discoveryclient.ServerPreferredResources()
 	if err != nil {
-		errs = append(errs, err)
+		return err
 	}
 
 	resources := []groupResource{}
@@ -194,7 +179,7 @@ func (o *APIResourceOptions) RunAPIResources(cmd *cobra.Command, f cmdutil.Facto
 				name += "." + r.APIGroup
 			}
 			if _, err := fmt.Fprintf(w, "%s\n", name); err != nil {
-				errs = append(errs, err)
+				return err
 			}
 		case "wide":
 			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%v\t%s\t%v\n",
@@ -204,7 +189,7 @@ func (o *APIResourceOptions) RunAPIResources(cmd *cobra.Command, f cmdutil.Facto
 				r.APIResource.Namespaced,
 				r.APIResource.Kind,
 				r.APIResource.Verbs); err != nil {
-				errs = append(errs, err)
+				return err
 			}
 		case "":
 			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%v\t%s\n",
@@ -213,13 +198,9 @@ func (o *APIResourceOptions) RunAPIResources(cmd *cobra.Command, f cmdutil.Facto
 				r.APIGroup,
 				r.APIResource.Namespaced,
 				r.APIResource.Kind); err != nil {
-				errs = append(errs, err)
+				return err
 			}
 		}
-	}
-
-	if len(errs) > 0 {
-		return errors.NewAggregate(errs)
 	}
 	return nil
 }

@@ -22,7 +22,7 @@ import (
 
 	"github.com/euank/go-kmsg-parser/kmsgparser"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 var (
@@ -101,18 +101,17 @@ func (self *OomParser) StreamOoms(outStream chan<- *OomInstance) {
 		in_oom_kernel_log := checkIfStartOfOomMessages(msg.Message)
 		if in_oom_kernel_log {
 			oomCurrentInstance := &OomInstance{
-				ContainerName:       "/",
-				VictimContainerName: "/",
-				TimeOfDeath:         msg.Timestamp,
+				ContainerName: "/",
+				TimeOfDeath:   msg.Timestamp,
 			}
 			for msg := range kmsgEntries {
 				err := getContainerName(msg.Message, oomCurrentInstance)
 				if err != nil {
-					klog.Errorf("%v", err)
+					glog.Errorf("%v", err)
 				}
 				finished, err := getProcessNamePid(msg.Message, oomCurrentInstance)
 				if err != nil {
-					klog.Errorf("%v", err)
+					glog.Errorf("%v", err)
 				}
 				if finished {
 					oomCurrentInstance.TimeOfDeath = msg.Timestamp
@@ -123,7 +122,7 @@ func (self *OomParser) StreamOoms(outStream chan<- *OomInstance) {
 		}
 	}
 	// Should not happen
-	klog.Errorf("exiting analyzeLines. OOM events will not be reported.")
+	glog.Errorf("exiting analyzeLines. OOM events will not be reported.")
 }
 
 // initializes an OomParser object. Returns an OomParser object and an error.
@@ -141,11 +140,11 @@ type glogAdapter struct{}
 var _ kmsgparser.Logger = glogAdapter{}
 
 func (glogAdapter) Infof(format string, args ...interface{}) {
-	klog.V(4).Infof(format, args...)
+	glog.V(4).Infof(format, args)
 }
 func (glogAdapter) Warningf(format string, args ...interface{}) {
-	klog.V(2).Infof(format, args...)
+	glog.V(2).Infof(format, args)
 }
 func (glogAdapter) Errorf(format string, args ...interface{}) {
-	klog.Warningf(format, args...)
+	glog.Warningf(format, args)
 }

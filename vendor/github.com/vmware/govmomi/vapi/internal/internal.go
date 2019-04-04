@@ -51,13 +51,15 @@ func (o AssociatedObject) Reference() types.ManagedObjectReference {
 
 // Association for tag-association requests.
 type Association struct {
+	TagID    string            `json:"tag_id,omitempty"`
 	ObjectID *AssociatedObject `json:"object_id,omitempty"`
 }
 
 // NewAssociation returns an Association, converting ref to an AssociatedObject.
-func NewAssociation(ref mo.Reference) Association {
+func NewAssociation(tagID string, ref mo.Reference) Association {
 	obj := AssociatedObject(ref.Reference())
 	return Association{
+		TagID:    tagID,
 		ObjectID: &obj,
 	}
 }

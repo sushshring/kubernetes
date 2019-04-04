@@ -29,14 +29,11 @@ import (
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/tools/cache"
-	watchtools "k8s.io/client-go/tools/watch"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/kubernetes/pkg/kubelet"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -119,8 +116,8 @@ func getRestartDelay(podClient *framework.PodClient, podName string, containerNa
 			continue
 		}
 
-		if status.State.Waiting == nil && status.State.Terminated != nil && status.LastTerminationState.Terminated != nil && status.State.Terminated.StartedAt.Time.After(beginTime) {
-			startedAt := status.State.Terminated.StartedAt.Time
+		if status.State.Waiting == nil && status.State.Running != nil && status.LastTerminationState.Terminated != nil && status.State.Running.StartedAt.Time.After(beginTime) {
+			startedAt := status.State.Running.StartedAt.Time
 			finishedAt := status.LastTerminationState.Terminated.FinishedAt.Time
 			framework.Logf("getRestartDelay: restartCount = %d, finishedAt=%s restartedAt=%s (%s)", status.RestartCount, finishedAt, startedAt, startedAt.Sub(finishedAt))
 			return startedAt.Sub(finishedAt), nil
@@ -195,30 +192,8 @@ var _ = framework.KubeDescribe("Pods", func() {
 			LabelSelector:   selector.String(),
 			ResourceVersion: pods.ListMeta.ResourceVersion,
 		}
-
-		listCompleted := make(chan bool, 1)
-		lw := &cache.ListWatch{
-			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-				options.LabelSelector = selector.String()
-				podList, err := podClient.List(options)
-				if err == nil {
-					select {
-					case listCompleted <- true:
-						framework.Logf("observed the pod list")
-						return podList, err
-					default:
-						framework.Logf("channel blocked")
-					}
-				}
-				return podList, err
-			},
-			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				options.LabelSelector = selector.String()
-				return podClient.Watch(options)
-			},
-		}
-		_, _, w, _ := watchtools.NewIndexerInformerWatcher(lw, &v1.Pod{})
-		defer w.Stop()
+		w, err := podClient.Watch(options)
+		Expect(err).NotTo(HaveOccurred(), "failed to set up watch")
 
 		By("submitting the pod to kubernetes")
 		podClient.Create(pod)
@@ -232,17 +207,12 @@ var _ = framework.KubeDescribe("Pods", func() {
 
 		By("verifying pod creation was observed")
 		select {
-		case <-listCompleted:
-			select {
-			case event, _ := <-w.ResultChan():
-				if event.Type != watch.Added {
-					framework.Failf("Failed to observe pod creation: %v", event)
-				}
-			case <-time.After(framework.PodStartTimeout):
-				framework.Failf("Timeout while waiting for pod creation")
+		case event, _ := <-w.ResultChan():
+			if event.Type != watch.Added {
+				framework.Failf("Failed to observe pod creation: %v", event)
 			}
-		case <-time.After(10 * time.Second):
-			framework.Failf("Timeout while waiting to observe pod list")
+		case <-time.After(framework.PodStartTimeout):
+			framework.Failf("Timeout while waiting for pod creation")
 		}
 
 		// We need to wait for the pod to be running, otherwise the deletion
@@ -251,6 +221,7 @@ var _ = framework.KubeDescribe("Pods", func() {
 		// save the running pod
 		pod, err = podClient.Get(pod.Name, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred(), "failed to GET scheduled pod")
+		framework.Logf("running pod: %#v", pod)
 
 		By("deleting the pod gracefully")
 		err = podClient.Delete(pod.Name, metav1.NewDeleteOptions(30))

@@ -18,13 +18,12 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-KUBE_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
-export KUBE_ROOT
+export KUBE_ROOT=$(dirname "${BASH_SOURCE}")/..
 source "${KUBE_ROOT}/hack/lib/init.sh"
 
 kube::util::ensure_clean_working_dir
 
-_tmpdir="$(kube::realpath "$(mktemp -d -t verify-generated-files.XXXXXX)")"
+_tmpdir="$(kube::realpath $(mktemp -d -t verify-generated-files.XXXXXX))"
 kube::util::trap_add "rm -rf ${_tmpdir}" EXIT
 
 _tmp_gopath="${_tmpdir}/go"

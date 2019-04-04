@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/imdario/mergo"
-
 	restclient "k8s.io/client-go/rest"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )

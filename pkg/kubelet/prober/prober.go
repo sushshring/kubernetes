@@ -39,7 +39,7 @@ import (
 	tcprobe "k8s.io/kubernetes/pkg/probe/tcp"
 	"k8s.io/utils/exec"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 const maxProbeRetries = 3
@@ -66,11 +66,10 @@ func newProber(
 	refManager *kubecontainer.RefManager,
 	recorder record.EventRecorder) *prober {
 
-	const followNonLocalRedirects = false
 	return &prober{
 		exec:          execprobe.New(),
-		readinessHttp: httprobe.New(followNonLocalRedirects),
-		livenessHttp:  httprobe.New(followNonLocalRedirects),
+		readinessHttp: httprobe.New(),
+		livenessHttp:  httprobe.New(),
 		tcp:           tcprobe.New(),
 		runner:        runner,
 		refManager:    refManager,
@@ -92,38 +91,31 @@ func (pb *prober) probe(probeType probeType, pod *v1.Pod, status v1.PodStatus, c
 
 	ctrName := fmt.Sprintf("%s:%s", format.Pod(pod), container.Name)
 	if probeSpec == nil {
-		klog.Warningf("%s probe for %s is nil", probeType, ctrName)
+		glog.Warningf("%s probe for %s is nil", probeType, ctrName)
 		return results.Success, nil
 	}
 
 	result, output, err := pb.runProbeWithRetries(probeType, probeSpec, pod, status, container, containerID, maxProbeRetries)
-	if err != nil || (result != probe.Success && result != probe.Warning) {
+	if err != nil || result != probe.Success {
 		// Probe failed in one way or another.
 		ref, hasRef := pb.refManager.GetRef(containerID)
 		if !hasRef {
-			klog.Warningf("No ref for container %q (%s)", containerID.String(), ctrName)
+			glog.Warningf("No ref for container %q (%s)", containerID.String(), ctrName)
 		}
 		if err != nil {
-			klog.V(1).Infof("%s probe for %q errored: %v", probeType, ctrName, err)
+			glog.V(1).Infof("%s probe for %q errored: %v", probeType, ctrName, err)
 			if hasRef {
 				pb.recorder.Eventf(ref, v1.EventTypeWarning, events.ContainerUnhealthy, "%s probe errored: %v", probeType, err)
 			}
 		} else { // result != probe.Success
-			klog.V(1).Infof("%s probe for %q failed (%v): %s", probeType, ctrName, result, output)
+			glog.V(1).Infof("%s probe for %q failed (%v): %s", probeType, ctrName, result, output)
 			if hasRef {
 				pb.recorder.Eventf(ref, v1.EventTypeWarning, events.ContainerUnhealthy, "%s probe failed: %s", probeType, output)
 			}
 		}
 		return results.Failure, err
 	}
-	if result == probe.Warning {
-		if ref, hasRef := pb.refManager.GetRef(containerID); hasRef {
-			pb.recorder.Eventf(ref, v1.EventTypeWarning, events.ContainerProbeWarning, "%s probe warning: %s", probeType, output)
-		}
-		klog.V(3).Infof("%s probe for %q succeeded with a warning: %s", probeType, ctrName, output)
-	} else {
-		klog.V(3).Infof("%s probe for %q succeeded", probeType, ctrName)
-	}
+	glog.V(3).Infof("%s probe for %q succeeded", probeType, ctrName)
 	return results.Success, nil
 }
 
@@ -155,7 +147,7 @@ func buildHeader(headerList []v1.HTTPHeader) http.Header {
 func (pb *prober) runProbe(probeType probeType, p *v1.Probe, pod *v1.Pod, status v1.PodStatus, container v1.Container, containerID kubecontainer.ContainerID) (probe.Result, string, error) {
 	timeout := time.Duration(p.TimeoutSeconds) * time.Second
 	if p.Exec != nil {
-		klog.V(4).Infof("Exec-Probe Pod: %v, Container: %v, Command: %v", pod, container, p.Exec.Command)
+		glog.V(4).Infof("Exec-Probe Pod: %v, Container: %v, Command: %v", pod, container, p.Exec.Command)
 		command := kubecontainer.ExpandContainerCommandOnlyStatic(p.Exec.Command, container.Env)
 		return pb.exec.Probe(pb.newExecInContainer(container, containerID, command, timeout))
 	}
@@ -170,10 +162,10 @@ func (pb *prober) runProbe(probeType probeType, p *v1.Probe, pod *v1.Pod, status
 			return probe.Unknown, "", err
 		}
 		path := p.HTTPGet.Path
-		klog.V(4).Infof("HTTP-Probe Host: %v://%v, Port: %v, Path: %v", scheme, host, port, path)
+		glog.V(4).Infof("HTTP-Probe Host: %v://%v, Port: %v, Path: %v", scheme, host, port, path)
 		url := formatURL(scheme, host, port, path)
 		headers := buildHeader(p.HTTPGet.HTTPHeaders)
-		klog.V(4).Infof("HTTP-Probe Headers: %v", headers)
+		glog.V(4).Infof("HTTP-Probe Headers: %v", headers)
 		if probeType == liveness {
 			return pb.livenessHttp.Probe(url, headers, timeout)
 		} else { // readiness
@@ -189,10 +181,10 @@ func (pb *prober) runProbe(probeType probeType, p *v1.Probe, pod *v1.Pod, status
 		if host == "" {
 			host = status.PodIP
 		}
-		klog.V(4).Infof("TCP-Probe Host: %v, Port: %v, Timeout: %v", host, port, timeout)
+		glog.V(4).Infof("TCP-Probe Host: %v, Port: %v, Timeout: %v", host, port, timeout)
 		return pb.tcp.Probe(host, port, timeout)
 	}
-	klog.Warningf("Failed to find probe builder for container: %v", container)
+	glog.Warningf("Failed to find probe builder for container: %v", container)
 	return probe.Unknown, "", fmt.Errorf("Missing probe handler for %s:%s", format.Pod(pod), container.Name)
 }
 
@@ -282,26 +274,6 @@ func (eic execInContainer) SetStderr(out io.Writer) {
 	//unimplemented
 }
 
-func (eic execInContainer) SetEnv(env []string) {
-	//unimplemented
-}
-
 func (eic execInContainer) Stop() {
 	//unimplemented
-}
-
-func (eic execInContainer) Start() error {
-	return fmt.Errorf("unimplemented")
-}
-
-func (eic execInContainer) Wait() error {
-	return fmt.Errorf("unimplemented")
-}
-
-func (eic execInContainer) StdoutPipe() (io.ReadCloser, error) {
-	return nil, fmt.Errorf("unimplemented")
-}
-
-func (eic execInContainer) StderrPipe() (io.ReadCloser, error) {
-	return nil, fmt.Errorf("unimplemented")
 }

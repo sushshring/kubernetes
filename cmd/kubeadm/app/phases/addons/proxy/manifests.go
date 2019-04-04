@@ -33,7 +33,7 @@ data:
     clusters:
     - cluster:
         certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-        server: {{ .ControlPlaneEndpoint }}
+        server: {{ .MasterEndpoint }}
       name: default
     contexts:
     - context:
@@ -69,6 +69,8 @@ spec:
     metadata:
       labels:
         k8s-app: kube-proxy
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ""
     spec:
       priorityClassName: system-node-critical
       containers:
@@ -78,7 +80,6 @@ spec:
         command:
         - /usr/local/bin/kube-proxy
         - --config=/var/lib/kube-proxy/{{ .ProxyConfigMapKey }}
-        - --hostname-override=$(NODE_NAME)
         securityContext:
           privileged: true
         volumeMounts:
@@ -90,11 +91,6 @@ spec:
         - mountPath: /lib/modules
           name: lib-modules
           readOnly: true
-        env:
-          - name: NODE_NAME
-            valueFrom:
-              fieldRef:
-                fieldPath: spec.nodeName
       hostNetwork: true
       serviceAccountName: kube-proxy
       volumes:

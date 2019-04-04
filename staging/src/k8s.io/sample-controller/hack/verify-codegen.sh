@@ -18,7 +18,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-SCRIPT_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
+SCRIPT_ROOT=$(dirname "${BASH_SOURCE}")/..
 
 DIFFROOT="${SCRIPT_ROOT}/pkg"
 TMP_DIFFROOT="${SCRIPT_ROOT}/_tmp/pkg"

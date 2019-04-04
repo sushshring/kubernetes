@@ -30,8 +30,8 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
@@ -39,7 +39,7 @@ var _ = SIGDescribe("[Feature:PodPreset] PodPreset", func() {
 	f := framework.NewDefaultFramework("podpreset")
 
 	var podClient *framework.PodClient
-	ginkgo.BeforeEach(func() {
+	BeforeEach(func() {
 		// only run on gce for the time being til we find an easier way to update
 		// the admission controllers used on the others
 		framework.SkipUnlessProviderIs("gce")
@@ -47,8 +47,8 @@ var _ = SIGDescribe("[Feature:PodPreset] PodPreset", func() {
 	})
 
 	// Simplest case: all pods succeed promptly
-	ginkgo.It("should create a pod preset", func() {
-		ginkgo.By("Creating a pod preset")
+	It("should create a pod preset", func() {
+		By("Creating a pod preset")
 
 		pip := &settings.PodPreset{
 			ObjectMeta: metav1.ObjectMeta{
@@ -77,9 +77,9 @@ var _ = SIGDescribe("[Feature:PodPreset] PodPreset", func() {
 		if errors.IsNotFound(err) {
 			framework.Skipf("podpresets requires k8s.io/api/settings/v1alpha1 to be enabled")
 		}
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		Expect(err).NotTo(HaveOccurred())
 
-		ginkgo.By("creating the pod")
+		By("creating the pod")
 		name := "pod-preset-pod"
 		value := strconv.Itoa(time.Now().Nanosecond())
 		pod := &v1.Pod{
@@ -99,40 +99,33 @@ var _ = SIGDescribe("[Feature:PodPreset] PodPreset", func() {
 						Image: imageutils.GetE2EImage(imageutils.Nginx),
 					},
 				},
-				InitContainers: []v1.Container{
-					{
-						Name:    "init1",
-						Image:   imageutils.GetE2EImage(imageutils.BusyBox),
-						Command: []string{"/bin/true"},
-					},
-				},
 			},
 		}
 
-		ginkgo.By("setting up watch")
+		By("setting up watch")
 		selector := labels.SelectorFromSet(labels.Set(map[string]string{"time": value}))
 		options := metav1.ListOptions{LabelSelector: selector.String()}
 		pods, err := podClient.List(options)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to query for pod")
-		gomega.Expect(len(pods.Items)).To(gomega.Equal(0))
+		Expect(err).NotTo(HaveOccurred(), "failed to query for pod")
+		Expect(len(pods.Items)).To(Equal(0))
 		options = metav1.ListOptions{
 			LabelSelector:   selector.String(),
 			ResourceVersion: pods.ListMeta.ResourceVersion,
 		}
 		w, err := podClient.Watch(options)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to set up watch")
+		Expect(err).NotTo(HaveOccurred(), "failed to set up watch")
 
-		ginkgo.By("submitting the pod to kubernetes")
+		By("submitting the pod to kubernetes")
 		podClient.Create(pod)
 
-		ginkgo.By("verifying the pod is in kubernetes")
+		By("verifying the pod is in kubernetes")
 		selector = labels.SelectorFromSet(labels.Set(map[string]string{"time": value}))
 		options = metav1.ListOptions{LabelSelector: selector.String()}
 		pods, err = podClient.List(options)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to query for pod")
-		gomega.Expect(len(pods.Items)).To(gomega.Equal(1))
+		Expect(err).NotTo(HaveOccurred(), "failed to query for pod")
+		Expect(len(pods.Items)).To(Equal(1))
 
-		ginkgo.By("verifying pod creation was observed")
+		By("verifying pod creation was observed")
 		select {
 		case event, _ := <-w.ResultChan():
 			if event.Type != watch.Added {
@@ -146,10 +139,10 @@ var _ = SIGDescribe("[Feature:PodPreset] PodPreset", func() {
 		// may be carried out immediately rather than gracefully.
 		framework.ExpectNoError(f.WaitForPodRunning(pod.Name))
 
-		ginkgo.By("ensuring pod is modified")
+		By("ensuring pod is modified")
 		// save the running pod
 		pod, err = podClient.Get(pod.Name, metav1.GetOptions{})
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to GET scheduled pod")
+		Expect(err).NotTo(HaveOccurred(), "failed to GET scheduled pod")
 
 		// check the annotation is there
 		if _, ok := pod.Annotations["podpreset.admission.kubernetes.io/podpreset-hello"]; !ok {
@@ -160,13 +153,10 @@ var _ = SIGDescribe("[Feature:PodPreset] PodPreset", func() {
 		if !reflect.DeepEqual(pip.Spec.Env, pod.Spec.Containers[0].Env) {
 			framework.Failf("env of pod container does not match the env of the pip: expected %#v, got: %#v", pip.Spec.Env, pod.Spec.Containers[0].Env)
 		}
-		if !reflect.DeepEqual(pip.Spec.Env, pod.Spec.InitContainers[0].Env) {
-			framework.Failf("env of pod init container does not match the env of the pip: expected %#v, got: %#v", pip.Spec.Env, pod.Spec.InitContainers[0].Env)
-		}
 	})
 
-	ginkgo.It("should not modify the pod on conflict", func() {
-		ginkgo.By("Creating a pod preset")
+	It("should not modify the pod on conflict", func() {
+		By("Creating a pod preset")
 
 		pip := &settings.PodPreset{
 			ObjectMeta: metav1.ObjectMeta{
@@ -195,9 +185,9 @@ var _ = SIGDescribe("[Feature:PodPreset] PodPreset", func() {
 		if errors.IsNotFound(err) {
 			framework.Skipf("podpresets requires k8s.io/api/settings/v1alpha1 to be enabled")
 		}
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		Expect(err).NotTo(HaveOccurred())
 
-		ginkgo.By("creating the pod")
+		By("creating the pod")
 		name := "pod-preset-pod"
 		value := strconv.Itoa(time.Now().Nanosecond())
 		originalPod := &v1.Pod{
@@ -218,41 +208,33 @@ var _ = SIGDescribe("[Feature:PodPreset] PodPreset", func() {
 						Env:   []v1.EnvVar{{Name: "abc", Value: "value2"}, {Name: "ABC", Value: "value"}},
 					},
 				},
-				InitContainers: []v1.Container{
-					{
-						Name:    "init1",
-						Image:   imageutils.GetE2EImage(imageutils.BusyBox),
-						Env:     []v1.EnvVar{{Name: "abc", Value: "value2"}, {Name: "ABC", Value: "value"}},
-						Command: []string{"/bin/true"},
-					},
-				},
 			},
 		}
 
-		ginkgo.By("setting up watch")
+		By("setting up watch")
 		selector := labels.SelectorFromSet(labels.Set(map[string]string{"time": value}))
 		options := metav1.ListOptions{LabelSelector: selector.String()}
 		pods, err := podClient.List(options)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to query for pod")
-		gomega.Expect(len(pods.Items)).To(gomega.Equal(0))
+		Expect(err).NotTo(HaveOccurred(), "failed to query for pod")
+		Expect(len(pods.Items)).To(Equal(0))
 		options = metav1.ListOptions{
 			LabelSelector:   selector.String(),
 			ResourceVersion: pods.ListMeta.ResourceVersion,
 		}
 		w, err := podClient.Watch(options)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to set up watch")
+		Expect(err).NotTo(HaveOccurred(), "failed to set up watch")
 
-		ginkgo.By("submitting the pod to kubernetes")
+		By("submitting the pod to kubernetes")
 		podClient.Create(originalPod)
 
-		ginkgo.By("verifying the pod is in kubernetes")
+		By("verifying the pod is in kubernetes")
 		selector = labels.SelectorFromSet(labels.Set(map[string]string{"time": value}))
 		options = metav1.ListOptions{LabelSelector: selector.String()}
 		pods, err = podClient.List(options)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to query for pod")
-		gomega.Expect(len(pods.Items)).To(gomega.Equal(1))
+		Expect(err).NotTo(HaveOccurred(), "failed to query for pod")
+		Expect(len(pods.Items)).To(Equal(1))
 
-		ginkgo.By("verifying pod creation was observed")
+		By("verifying pod creation was observed")
 		select {
 		case event, _ := <-w.ResultChan():
 			if event.Type != watch.Added {
@@ -266,10 +248,10 @@ var _ = SIGDescribe("[Feature:PodPreset] PodPreset", func() {
 		// may be carried out immediately rather than gracefully.
 		framework.ExpectNoError(f.WaitForPodRunning(originalPod.Name))
 
-		ginkgo.By("ensuring pod is modified")
+		By("ensuring pod is modified")
 		// save the running pod
 		pod, err := podClient.Get(originalPod.Name, metav1.GetOptions{})
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to GET scheduled pod")
+		Expect(err).NotTo(HaveOccurred(), "failed to GET scheduled pod")
 
 		// check the annotation is not there
 		if _, ok := pod.Annotations["podpreset.admission.kubernetes.io/podpreset-hello"]; ok {
@@ -280,10 +262,6 @@ var _ = SIGDescribe("[Feature:PodPreset] PodPreset", func() {
 		if !reflect.DeepEqual(originalPod.Spec.Containers[0].Env, pod.Spec.Containers[0].Env) {
 			framework.Failf("env of pod container does not match the env of the original pod: expected %#v, got: %#v", originalPod.Spec.Containers[0].Env, pod.Spec.Containers[0].Env)
 		}
-		if !reflect.DeepEqual(originalPod.Spec.InitContainers[0].Env, pod.Spec.InitContainers[0].Env) {
-			framework.Failf("env of pod init container does not match the env of the original pod: expected %#v, got: %#v", originalPod.Spec.InitContainers[0].Env, pod.Spec.InitContainers[0].Env)
-		}
-
 	})
 })
 

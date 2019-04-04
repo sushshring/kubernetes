@@ -21,13 +21,12 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-KUBE_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
+KUBE_ROOT=$(dirname "${BASH_SOURCE}")/..
 
 # Build a dev release
+make -f ${KUBE_ROOT}/Makefile quick-release
 
-
-if ! make -f "${KUBE_ROOT}"/Makefile quick-release
-then
+if [ "$?" != "0" ]; then
         echo "Building the release failed!"
         exit 1
 fi

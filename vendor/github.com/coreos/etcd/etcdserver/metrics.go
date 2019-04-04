@@ -90,12 +90,6 @@ var (
 		Name:      "slow_read_indexes_total",
 		Help:      "The total number of pending read indexes not in sync with leader's or timed out read index requests.",
 	})
-	readIndexFailed = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "etcd",
-		Subsystem: "server",
-		Name:      "read_indexes_failed_total",
-		Help:      "The total number of failed read indexes seen.",
-	})
 	quotaBackendBytes = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: "etcd",
 		Subsystem: "server",
@@ -116,13 +110,6 @@ var (
 		Help:      "Which Go version server is running with. 1 for 'server_go_version' label with current version.",
 	},
 		[]string{"server_go_version"})
-	serverID = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: "etcd",
-		Subsystem: "server",
-		Name:      "id",
-		Help:      "Server or member ID in hexadecimal format. 1 for 'server_id' label with current ID.",
-	},
-		[]string{"server_id"})
 )
 
 func init() {
@@ -137,11 +124,9 @@ func init() {
 	prometheus.MustRegister(proposalsFailed)
 	prometheus.MustRegister(leaseExpired)
 	prometheus.MustRegister(slowReadIndex)
-	prometheus.MustRegister(readIndexFailed)
 	prometheus.MustRegister(quotaBackendBytes)
 	prometheus.MustRegister(currentVersion)
 	prometheus.MustRegister(currentGoVersion)
-	prometheus.MustRegister(serverID)
 
 	currentVersion.With(prometheus.Labels{
 		"server_version": version.Version,

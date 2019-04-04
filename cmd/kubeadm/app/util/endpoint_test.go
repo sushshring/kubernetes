@@ -22,7 +22,7 @@ import (
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 )
 
-func TestGetControlPlaneEndpoint(t *testing.T) {
+func TestGetMasterEndpoint(t *testing.T) {
 	var tests = []struct {
 		name             string
 		cfg              *kubeadmapi.InitConfiguration
@@ -32,7 +32,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "use ControlPlaneEndpoint (dns) if fully defined",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					BindPort:         4567,
 					AdvertiseAddress: "4.5.6.7",
 				},
@@ -45,7 +45,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "use ControlPlaneEndpoint (ipv4) if fully defined",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					BindPort:         4567,
 					AdvertiseAddress: "4.5.6.7",
 				},
@@ -58,7 +58,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "use ControlPlaneEndpoint (ipv6) if fully defined",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					BindPort:         4567,
 					AdvertiseAddress: "4.5.6.7",
 				},
@@ -71,7 +71,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "use ControlPlaneEndpoint (dns) + BindPort if ControlPlaneEndpoint defined without port",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					BindPort:         4567,
 					AdvertiseAddress: "4.5.6.7",
 				},
@@ -85,7 +85,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "use ControlPlaneEndpoint (ipv4) + BindPort if ControlPlaneEndpoint defined without port",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					BindPort:         4567,
 					AdvertiseAddress: "4.5.6.7",
 				},
@@ -98,7 +98,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "use ControlPlaneEndpoint (ipv6) + BindPort if ControlPlaneEndpoint defined without port",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					BindPort:         4567,
 					AdvertiseAddress: "4.5.6.7",
 				},
@@ -112,7 +112,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "use AdvertiseAddress (ipv4) + BindPort if ControlPlaneEndpoint is not defined",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					BindPort:         4567,
 					AdvertiseAddress: "4.5.6.7",
 				},
@@ -122,7 +122,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "use AdvertiseAddress (ipv6) + BindPort if ControlPlaneEndpoint is not defined",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					BindPort:         4567,
 					AdvertiseAddress: "2001:db8::1",
 				},
@@ -132,7 +132,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "fail if invalid BindPort",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					BindPort: 0,
 				},
 			},
@@ -177,7 +177,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "fail if invalid AdvertiseAddress (ip4)",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					AdvertiseAddress: "1..0",
 					BindPort:         4567,
 				},
@@ -187,7 +187,7 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 		{
 			name: "fail if invalid AdvertiseAddress (ip6)",
 			cfg: &kubeadmapi.InitConfiguration{
-				LocalAPIEndpoint: kubeadmapi.APIEndpoint{
+				APIEndpoint: kubeadmapi.APIEndpoint{
 					AdvertiseAddress: "1200::AB00:1234::2552:7777:1313",
 					BindPort:         4567,
 				},
@@ -197,21 +197,19 @@ func TestGetControlPlaneEndpoint(t *testing.T) {
 	}
 
 	for _, rt := range tests {
-		t.Run(rt.name, func(t *testing.T) {
-			actualEndpoint, actualError := GetControlPlaneEndpoint(rt.cfg.ControlPlaneEndpoint, &rt.cfg.LocalAPIEndpoint)
+		actualEndpoint, actualError := GetMasterEndpoint(rt.cfg)
 
-			if (actualError != nil) && !rt.expectedError {
-				t.Errorf("%s unexpected failure: %v", rt.name, actualError)
-				return
-			} else if (actualError == nil) && rt.expectedError {
-				t.Errorf("%s passed when expected to fail", rt.name)
-				return
-			}
+		if (actualError != nil) && !rt.expectedError {
+			t.Errorf("%s unexpected failure: %v", rt.name, actualError)
+			continue
+		} else if (actualError == nil) && rt.expectedError {
+			t.Errorf("%s passed when expected to fail", rt.name)
+			continue
+		}
 
-			if actualEndpoint != rt.expectedEndpoint {
-				t.Errorf("%s returned invalid endpoint %s, expected %s", rt.name, actualEndpoint, rt.expectedEndpoint)
-			}
-		})
+		if actualEndpoint != rt.expectedEndpoint {
+			t.Errorf("%s returned invalid endpoint %s, expected %s", rt.name, actualEndpoint, rt.expectedEndpoint)
+		}
 	}
 }
 
@@ -318,26 +316,24 @@ func TestParseHostPort(t *testing.T) {
 	}
 
 	for _, rt := range tests {
-		t.Run(rt.name, func(t *testing.T) {
-			actualHost, actualPort, actualError := ParseHostPort(rt.hostport)
+		actualHost, actualPort, actualError := ParseHostPort(rt.hostport)
 
-			if (actualError != nil) && !rt.expectedError {
-				t.Errorf("%s unexpected failure: %v", rt.name, actualError)
-				return
-			} else if (actualError == nil) && rt.expectedError {
-				t.Errorf("%s passed when expected to fail", rt.name)
-				return
-			}
+		if (actualError != nil) && !rt.expectedError {
+			t.Errorf("%s unexpected failure: %v", rt.name, actualError)
+			continue
+		} else if (actualError == nil) && rt.expectedError {
+			t.Errorf("%s passed when expected to fail", rt.name)
+			continue
+		}
 
-			if actualHost != rt.expectedHost {
-				t.Errorf("%s returned invalid host %s, expected %s", rt.name, actualHost, rt.expectedHost)
-				return
-			}
+		if actualHost != rt.expectedHost {
+			t.Errorf("%s returned invalid host %s, expected %s", rt.name, actualHost, rt.expectedHost)
+			continue
+		}
 
-			if actualPort != rt.expectedPort {
-				t.Errorf("%s returned invalid port %s, expected %s", rt.name, actualPort, rt.expectedPort)
-			}
-		})
+		if actualPort != rt.expectedPort {
+			t.Errorf("%s returned invalid port %s, expected %s", rt.name, actualPort, rt.expectedPort)
+		}
 	}
 }
 
@@ -372,20 +368,18 @@ func TestParsePort(t *testing.T) {
 	}
 
 	for _, rt := range tests {
-		t.Run(rt.name, func(t *testing.T) {
-			actualPort, actualError := ParsePort(rt.port)
+		actualPort, actualError := ParsePort(rt.port)
 
-			if (actualError != nil) && !rt.expectedError {
-				t.Errorf("%s unexpected failure: %v", rt.name, actualError)
-				return
-			} else if (actualError == nil) && rt.expectedError {
-				t.Errorf("%s passed when expected to fail", rt.name)
-				return
-			}
+		if (actualError != nil) && !rt.expectedError {
+			t.Errorf("%s unexpected failure: %v", rt.name, actualError)
+			continue
+		} else if (actualError == nil) && rt.expectedError {
+			t.Errorf("%s passed when expected to fail", rt.name)
+			continue
+		}
 
-			if actualPort != rt.expectedPort {
-				t.Errorf("%s returned invalid port %d, expected %d", rt.name, actualPort, rt.expectedPort)
-			}
-		})
+		if actualPort != rt.expectedPort {
+			t.Errorf("%s returned invalid port %d, expected %d", rt.name, actualPort, rt.expectedPort)
+		}
 	}
 }

@@ -31,13 +31,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/kubernetes/pkg/kubectl/scheme"
 	"k8s.io/utils/exec"
 )
 
 func TestMerge(t *testing.T) {
+	grace := int64(30)
+	enableServiceLinks := corev1.DefaultEnableServiceLinks
 	tests := []struct {
 		obj       runtime.Object
 		fragment  string
@@ -59,7 +60,14 @@ func TestMerge(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "foo",
 				},
-				Spec: corev1.PodSpec{},
+				Spec: corev1.PodSpec{
+					RestartPolicy:                 corev1.RestartPolicyAlways,
+					DNSPolicy:                     corev1.DNSClusterFirst,
+					TerminationGracePeriodSeconds: &grace,
+					SecurityContext:               &corev1.PodSecurityContext{},
+					SchedulerName:                 corev1.DefaultSchedulerName,
+					EnableServiceLinks:            &enableServiceLinks,
+				},
 			},
 		},
 		/* TODO: uncomment this test once Merge is updated to use
@@ -119,12 +127,20 @@ func TestMerge(t *testing.T) {
 				Spec: corev1.PodSpec{
 					Volumes: []corev1.Volume{
 						{
-							Name: "v1",
+							Name:         "v1",
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 						},
 						{
-							Name: "v2",
+							Name:         "v2",
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 						},
 					},
+					RestartPolicy:                 corev1.RestartPolicyAlways,
+					DNSPolicy:                     corev1.DNSClusterFirst,
+					TerminationGracePeriodSeconds: &grace,
+					SecurityContext:               &corev1.PodSecurityContext{},
+					SchedulerName:                 corev1.DefaultSchedulerName,
+					EnableServiceLinks:            &enableServiceLinks,
 				},
 			},
 		},
@@ -150,9 +166,12 @@ func TestMerge(t *testing.T) {
 					APIVersion: "v1",
 				},
 				Spec: corev1.ServiceSpec{
+					SessionAffinity: "None",
+					Type:            corev1.ServiceTypeClusterIP,
 					Ports: []corev1.ServicePort{
 						{
-							Port: 0,
+							Protocol: corev1.ProtocolTCP,
+							Port:     0,
 						},
 					},
 				},
@@ -173,6 +192,8 @@ func TestMerge(t *testing.T) {
 					APIVersion: "v1",
 				},
 				Spec: corev1.ServiceSpec{
+					SessionAffinity: "None",
+					Type:            corev1.ServiceTypeClusterIP,
 					Selector: map[string]string{
 						"version": "v2",
 					},
@@ -189,7 +210,7 @@ func TestMerge(t *testing.T) {
 			if err != nil {
 				t.Errorf("testcase[%d], unexpected error: %v", i, err)
 			} else if !apiequality.Semantic.DeepEqual(test.expected, out) {
-				t.Errorf("\n\ntestcase[%d]\nexpected:\n%s", i, diff.ObjectReflectDiff(test.expected, out))
+				t.Errorf("\n\ntestcase[%d]\nexpected:\n%+v\nsaw:\n%+v", i, test.expected, out)
 			}
 		}
 		if test.expectErr && err == nil {

@@ -43,7 +43,7 @@ import (
 	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 // EtcdTestServer encapsulates the datastructures needed to start local instance for testing
@@ -220,7 +220,7 @@ func (m *EtcdTestServer) waitUntilUp() error {
 	for start := time.Now(); time.Since(start) < wait.ForeverTestTimeout; time.Sleep(10 * time.Millisecond) {
 		members, err := membersAPI.List(context.TODO())
 		if err != nil {
-			klog.Errorf("Error when getting etcd cluster members")
+			glog.Errorf("Error when getting etcd cluster members")
 			continue
 		}
 		if len(members) == 1 && len(members[0].ClientURLs) > 0 {
@@ -293,12 +293,11 @@ func NewUnsecuredEtcd3TestClientServer(t *testing.T) (*EtcdTestServer, *storageb
 	}
 	server.V3Client = server.v3Cluster.RandClient()
 	config := &storagebackend.Config{
-		Type:   "etcd3",
-		Prefix: etcdtest.PathPrefix(),
-		Transport: storagebackend.TransportConfig{
-			ServerList: server.V3Client.Endpoints(),
-		},
-		Paging: true,
+		Type:                     "etcd3",
+		Prefix:                   etcdtest.PathPrefix(),
+		ServerList:               server.V3Client.Endpoints(),
+		DeserializationCacheSize: etcdtest.DeserializationCacheSize,
+		Paging:                   true,
 	}
 	return server, config
 }

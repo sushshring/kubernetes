@@ -21,7 +21,7 @@ import (
 	"strconv"
 	"sync"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -41,9 +41,6 @@ type AssumeCache interface {
 
 	// Get the object by name
 	Get(objName string) (interface{}, error)
-
-	// Get the API object by name
-	GetAPIObj(objName string) (interface{}, error)
 
 	// List all the objects in the cache
 	List(indexObj interface{}) []interface{}
@@ -155,7 +152,7 @@ func (c *assumeCache) add(obj interface{}) {
 
 	name, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
-		klog.Errorf("add failed: %v", &errObjectName{err})
+		glog.Errorf("add failed: %v", &errObjectName{err})
 		return
 	}
 
@@ -165,27 +162,27 @@ func (c *assumeCache) add(obj interface{}) {
 	if objInfo, _ := c.getObjInfo(name); objInfo != nil {
 		newVersion, err := c.getObjVersion(name, obj)
 		if err != nil {
-			klog.Errorf("add: couldn't get object version: %v", err)
+			glog.Errorf("add: couldn't get object version: %v", err)
 			return
 		}
 
 		storedVersion, err := c.getObjVersion(name, objInfo.latestObj)
 		if err != nil {
-			klog.Errorf("add: couldn't get stored object version: %v", err)
+			glog.Errorf("add: couldn't get stored object version: %v", err)
 			return
 		}
 
 		// Only update object if version is newer.
 		// This is so we don't override assumed objects due to informer resync.
 		if newVersion <= storedVersion {
-			klog.V(10).Infof("Skip adding %v %v to assume cache because version %v is not newer than %v", c.description, name, newVersion, storedVersion)
+			glog.V(10).Infof("Skip adding %v %v to assume cache because version %v is not newer than %v", c.description, name, newVersion, storedVersion)
 			return
 		}
 	}
 
 	objInfo := &objInfo{name: name, latestObj: obj, apiObj: obj}
 	c.store.Update(objInfo)
-	klog.V(10).Infof("Adding %v %v to assume cache: %+v ", c.description, name, obj)
+	glog.V(10).Infof("Adding %v %v to assume cache: %+v ", c.description, name, obj)
 }
 
 func (c *assumeCache) update(oldObj interface{}, newObj interface{}) {
@@ -199,7 +196,7 @@ func (c *assumeCache) delete(obj interface{}) {
 
 	name, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
-		klog.Errorf("delete failed: %v", &errObjectName{err})
+		glog.Errorf("delete failed: %v", &errObjectName{err})
 		return
 	}
 
@@ -209,7 +206,7 @@ func (c *assumeCache) delete(obj interface{}) {
 	objInfo := &objInfo{name: name}
 	err = c.store.Delete(objInfo)
 	if err != nil {
-		klog.Errorf("delete: failed to delete %v %v: %v", c.description, name, err)
+		glog.Errorf("delete: failed to delete %v %v: %v", c.description, name, err)
 	}
 }
 
@@ -253,17 +250,6 @@ func (c *assumeCache) Get(objName string) (interface{}, error) {
 	return objInfo.latestObj, nil
 }
 
-func (c *assumeCache) GetAPIObj(objName string) (interface{}, error) {
-	c.rwMutex.RLock()
-	defer c.rwMutex.RUnlock()
-
-	objInfo, err := c.getObjInfo(objName)
-	if err != nil {
-		return nil, err
-	}
-	return objInfo.apiObj, nil
-}
-
 func (c *assumeCache) List(indexObj interface{}) []interface{} {
 	c.rwMutex.RLock()
 	defer c.rwMutex.RUnlock()
@@ -271,14 +257,14 @@ func (c *assumeCache) List(indexObj interface{}) []interface{} {
 	allObjs := []interface{}{}
 	objs, err := c.store.Index(c.indexName, &objInfo{latestObj: indexObj})
 	if err != nil {
-		klog.Errorf("list index error: %v", err)
+		glog.Errorf("list index error: %v", err)
 		return nil
 	}
 
 	for _, obj := range objs {
 		objInfo, ok := obj.(*objInfo)
 		if !ok {
-			klog.Errorf("list error: %v", &errWrongType{"objInfo", obj})
+			glog.Errorf("list error: %v", &errWrongType{"objInfo", obj})
 			continue
 		}
 		allObjs = append(allObjs, objInfo.latestObj)
@@ -311,12 +297,12 @@ func (c *assumeCache) Assume(obj interface{}) error {
 	}
 
 	if newVersion < storedVersion {
-		return fmt.Errorf("%v %q is out of sync (stored: %d, assume: %d)", c.description, name, storedVersion, newVersion)
+		return fmt.Errorf("%v %q is out of sync", c.description, name)
 	}
 
 	// Only update the cached object
 	objInfo.latestObj = obj
-	klog.V(4).Infof("Assumed %v %q, version %v", c.description, name, newVersion)
+	glog.V(4).Infof("Assumed %v %q, version %v", c.description, name, newVersion)
 	return nil
 }
 
@@ -327,10 +313,10 @@ func (c *assumeCache) Restore(objName string) {
 	objInfo, err := c.getObjInfo(objName)
 	if err != nil {
 		// This could be expected if object got deleted
-		klog.V(5).Infof("Restore %v %q warning: %v", c.description, objName, err)
+		glog.V(5).Infof("Restore %v %q warning: %v", c.description, objName, err)
 	} else {
 		objInfo.latestObj = objInfo.apiObj
-		klog.V(4).Infof("Restored %v %q", c.description, objName)
+		glog.V(4).Infof("Restored %v %q", c.description, objName)
 	}
 }
 
@@ -339,7 +325,6 @@ type PVAssumeCache interface {
 	AssumeCache
 
 	GetPV(pvName string) (*v1.PersistentVolume, error)
-	GetAPIPV(pvName string) (*v1.PersistentVolume, error)
 	ListPVs(storageClassName string) []*v1.PersistentVolume
 }
 
@@ -371,18 +356,6 @@ func (c *pvAssumeCache) GetPV(pvName string) (*v1.PersistentVolume, error) {
 	return pv, nil
 }
 
-func (c *pvAssumeCache) GetAPIPV(pvName string) (*v1.PersistentVolume, error) {
-	obj, err := c.GetAPIObj(pvName)
-	if err != nil {
-		return nil, err
-	}
-	pv, ok := obj.(*v1.PersistentVolume)
-	if !ok {
-		return nil, &errWrongType{"v1.PersistentVolume", obj}
-	}
-	return pv, nil
-}
-
 func (c *pvAssumeCache) ListPVs(storageClassName string) []*v1.PersistentVolume {
 	objs := c.List(&v1.PersistentVolume{
 		Spec: v1.PersistentVolumeSpec{
@@ -393,7 +366,7 @@ func (c *pvAssumeCache) ListPVs(storageClassName string) []*v1.PersistentVolume 
 	for _, obj := range objs {
 		pv, ok := obj.(*v1.PersistentVolume)
 		if !ok {
-			klog.Errorf("ListPVs: %v", &errWrongType{"v1.PersistentVolume", obj})
+			glog.Errorf("ListPVs: %v", &errWrongType{"v1.PersistentVolume", obj})
 		}
 		pvs = append(pvs, pv)
 	}
@@ -404,10 +377,10 @@ func (c *pvAssumeCache) ListPVs(storageClassName string) []*v1.PersistentVolume 
 type PVCAssumeCache interface {
 	AssumeCache
 
-	// GetPVC returns the PVC from the cache with given pvcKey.
+	// GetPVC returns the PVC from the cache with the same
+	// namespace and the same name of the specified pod.
 	// pvcKey is the result of MetaNamespaceKeyFunc on PVC obj
 	GetPVC(pvcKey string) (*v1.PersistentVolumeClaim, error)
-	GetAPIPVC(pvcKey string) (*v1.PersistentVolumeClaim, error)
 }
 
 type pvcAssumeCache struct {
@@ -424,18 +397,6 @@ func (c *pvcAssumeCache) GetPVC(pvcKey string) (*v1.PersistentVolumeClaim, error
 		return nil, err
 	}
 
-	pvc, ok := obj.(*v1.PersistentVolumeClaim)
-	if !ok {
-		return nil, &errWrongType{"v1.PersistentVolumeClaim", obj}
-	}
-	return pvc, nil
-}
-
-func (c *pvcAssumeCache) GetAPIPVC(pvcKey string) (*v1.PersistentVolumeClaim, error) {
-	obj, err := c.GetAPIObj(pvcKey)
-	if err != nil {
-		return nil, err
-	}
 	pvc, ok := obj.(*v1.PersistentVolumeClaim)
 	if !ok {
 		return nil, &errWrongType{"v1.PersistentVolumeClaim", obj}

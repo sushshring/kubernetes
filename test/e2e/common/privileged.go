@@ -45,8 +45,7 @@ var _ = framework.KubeDescribe("PrivilegedPod [NodeConformance]", func() {
 		notPrivilegedContainer: "not-privileged-container",
 	}
 
-	It("should enable privileged commands [LinuxOnly]", func() {
-		// Windows does not support privileged containers.
+	It("should enable privileged commands", func() {
 		By("Creating a pod with a privileged container")
 		config.createPods()
 

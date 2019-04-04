@@ -119,12 +119,12 @@ func containerRuntime() error {
 	return printSuccess("Container Runtime Check: %s", success)
 }
 
-const kubeletClusterDNSRegexStr = `\/kubelet.*--cluster-dns=(\S+) `
+const kubeletClusterDnsRegexStr = `\/kubelet.*--cluster-dns=(\S+) `
 const kubeletClusterDomainRegexStr = `\/kubelet.*--cluster-domain=(\S+)`
 
 // dns checks that cluster dns has been properly configured and can resolve the kubernetes.default service
 func dns() error {
-	dnsRegex, err := regexp.Compile(kubeletClusterDNSRegexStr)
+	dnsRegex, err := regexp.Compile(kubeletClusterDnsRegexStr)
 	if err != nil {
 		// This should never happen and can only be fixed by changing the code
 		panic(err)

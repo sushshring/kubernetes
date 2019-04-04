@@ -4,7 +4,7 @@ go_library(
     name = "go_default_library",
     srcs = [
         "errors.go",
-        "netutil.go",
+        "multidialer.go",
         "parsers.go",
     ],
     importmap = "k8s.io/kubernetes/vendor/github.com/storageos/go-api/netutil",

@@ -70,10 +70,21 @@ func NewControllerRevision(parent metav1.Object,
 	for k, v := range templateLabels {
 		labelMap[k] = v
 	}
+	blockOwnerDeletion := true
+	isController := true
 	cr := &apps.ControllerRevision{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels:          labelMap,
-			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(parent, parentKind)},
+			Labels: labelMap,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         parentKind.GroupVersion().String(),
+					Kind:               parentKind.Kind,
+					Name:               parent.GetName(),
+					UID:                parent.GetUID(),
+					BlockOwnerDeletion: &blockOwnerDeletion,
+					Controller:         &isController,
+				},
+			},
 		},
 		Data:     data,
 		Revision: revision,
@@ -102,7 +113,7 @@ func HashControllerRevision(revision *apps.ControllerRevision, probe *int32) str
 
 // SortControllerRevisions sorts revisions by their Revision.
 func SortControllerRevisions(revisions []*apps.ControllerRevision) {
-	sort.Stable(byRevision(revisions))
+	sort.Sort(byRevision(revisions))
 }
 
 // EqualRevision returns true if lhs and rhs are either both nil, or both point to non-nil ControllerRevisions that
@@ -151,14 +162,7 @@ func (br byRevision) Len() int {
 	return len(br)
 }
 
-// Less breaks ties first by creation timestamp, then by name
 func (br byRevision) Less(i, j int) bool {
-	if br[i].Revision == br[j].Revision {
-		if br[j].CreationTimestamp.Equal(&br[i].CreationTimestamp) {
-			return br[i].Name < br[j].Name
-		}
-		return br[j].CreationTimestamp.After(br[i].CreationTimestamp.Time)
-	}
 	return br[i].Revision < br[j].Revision
 }
 
@@ -406,6 +410,8 @@ func (fh *fakeHistory) UpdateControllerRevision(revision *apps.ControllerRevisio
 }
 
 func (fh *fakeHistory) AdoptControllerRevision(parent metav1.Object, parentKind schema.GroupVersionKind, revision *apps.ControllerRevision) (*apps.ControllerRevision, error) {
+	blockOwnerDeletion := true
+	isController := true
 	if owner := metav1.GetControllerOf(revision); owner != nil {
 		return nil, fmt.Errorf("attempt to adopt revision owned by %v", owner)
 	}
@@ -421,8 +427,16 @@ func (fh *fakeHistory) AdoptControllerRevision(parent metav1.Object, parentKind 
 		return nil, errors.NewNotFound(apps.Resource("controllerrevisions"), revision.Name)
 	}
 	clone := revision.DeepCopy()
-	clone.OwnerReferences = append(clone.OwnerReferences, *metav1.NewControllerRef(parent, parentKind))
+	clone.OwnerReferences = append(clone.OwnerReferences, metav1.OwnerReference{
+		APIVersion:         parentKind.GroupVersion().String(),
+		Kind:               parentKind.Kind,
+		Name:               parent.GetName(),
+		UID:                parent.GetUID(),
+		BlockOwnerDeletion: &blockOwnerDeletion,
+		Controller:         &isController,
+	})
 	return clone, fh.indexer.Update(clone)
+
 }
 
 func (fh *fakeHistory) ReleaseControllerRevision(parent metav1.Object, revision *apps.ControllerRevision) (*apps.ControllerRevision, error) {

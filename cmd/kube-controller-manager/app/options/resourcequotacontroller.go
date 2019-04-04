@@ -19,12 +19,14 @@ package options
 import (
 	"github.com/spf13/pflag"
 
-	resourcequotaconfig "k8s.io/kubernetes/pkg/controller/resourcequota/config"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubectrlmgrconfig "k8s.io/kubernetes/pkg/controller/apis/config"
 )
 
 // ResourceQuotaControllerOptions holds the ResourceQuotaController options.
 type ResourceQuotaControllerOptions struct {
-	*resourcequotaconfig.ResourceQuotaControllerConfiguration
+	ResourceQuotaSyncPeriod      metav1.Duration
+	ConcurrentResourceQuotaSyncs int32
 }
 
 // AddFlags adds flags related to ResourceQuotaController for controller manager to the specified FlagSet.
@@ -38,7 +40,7 @@ func (o *ResourceQuotaControllerOptions) AddFlags(fs *pflag.FlagSet) {
 }
 
 // ApplyTo fills up ResourceQuotaController config with options.
-func (o *ResourceQuotaControllerOptions) ApplyTo(cfg *resourcequotaconfig.ResourceQuotaControllerConfiguration) error {
+func (o *ResourceQuotaControllerOptions) ApplyTo(cfg *kubectrlmgrconfig.ResourceQuotaControllerConfiguration) error {
 	if o == nil {
 		return nil
 	}

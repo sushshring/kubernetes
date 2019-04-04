@@ -19,20 +19,18 @@ package autoscale
 import (
 	"fmt"
 
+	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	"k8s.io/klog"
 
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/printers"
-	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/cli-runtime/pkg/genericclioptions/printers"
+	"k8s.io/cli-runtime/pkg/genericclioptions/resource"
 	autoscalingv1client "k8s.io/client-go/kubernetes/typed/autoscaling/v1"
-	"k8s.io/client-go/scale"
 	"k8s.io/kubernetes/pkg/kubectl"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/kubectl/generate"
-	generateversioned "k8s.io/kubernetes/pkg/kubectl/generate/versioned"
+	"k8s.io/kubernetes/pkg/kubectl/polymorphichelpers"
 	"k8s.io/kubernetes/pkg/kubectl/scheme"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/kubectl/util/templates"
@@ -42,7 +40,7 @@ var (
 	autoscaleLong = templates.LongDesc(i18n.T(`
 		Creates an autoscaler that automatically chooses and sets the number of pods that run in a kubernetes cluster.
 
-		Looks up a Deployment, ReplicaSet, StatefulSet, or ReplicationController by name and creates an autoscaler that uses the given resource as a reference.
+		Looks up a Deployment, ReplicaSet, or ReplicationController by name and creates an autoscaler that uses the given resource as a reference.
 		An autoscaler can automatically increase or decrease number of pods deployed within the system as needed.`))
 
 	autoscaleExample = templates.Examples(i18n.T(`
@@ -66,7 +64,7 @@ type AutoscaleOptions struct {
 	Generator  string
 	Min        int32
 	Max        int32
-	CPUPercent int32
+	CpuPercent int32
 
 	createAnnotation bool
 	args             []string
@@ -74,10 +72,10 @@ type AutoscaleOptions struct {
 	namespace        string
 	dryRun           bool
 	builder          *resource.Builder
-	generatorFunc    func(string, *meta.RESTMapping) (generate.StructuredGenerator, error)
+	canBeAutoscaled  polymorphichelpers.CanBeAutoscaledFunc
+	generatorFunc    func(string, *meta.RESTMapping) (kubectl.StructuredGenerator, error)
 
-	HPAClient         autoscalingv1client.HorizontalPodAutoscalersGetter
-	scaleKindResolver scale.ScaleKindResolver
+	HPAClient autoscalingv1client.HorizontalPodAutoscalersGetter
 
 	genericclioptions.IOStreams
 }
@@ -116,11 +114,11 @@ func NewCmdAutoscale(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *
 	o.RecordFlags.AddFlags(cmd)
 	o.PrintFlags.AddFlags(cmd)
 
-	cmd.Flags().StringVar(&o.Generator, "generator", generateversioned.HorizontalPodAutoscalerV1GeneratorName, i18n.T("The name of the API generator to use. Currently there is only 1 generator."))
+	cmd.Flags().StringVar(&o.Generator, "generator", cmdutil.HorizontalPodAutoscalerV1GeneratorName, i18n.T("The name of the API generator to use. Currently there is only 1 generator."))
 	cmd.Flags().Int32Var(&o.Min, "min", -1, "The lower limit for the number of pods that can be set by the autoscaler. If it's not specified or negative, the server will apply a default value.")
 	cmd.Flags().Int32Var(&o.Max, "max", -1, "The upper limit for the number of pods that can be set by the autoscaler. Required.")
 	cmd.MarkFlagRequired("max")
-	cmd.Flags().Int32Var(&o.CPUPercent, "cpu-percent", -1, fmt.Sprintf("The target average CPU utilization (represented as a percent of requested CPU) over all the pods. If it's not specified or negative, a default autoscaling policy will be used."))
+	cmd.Flags().Int32Var(&o.CpuPercent, "cpu-percent", -1, fmt.Sprintf("The target average CPU utilization (represented as a percent of requested CPU) over all the pods. If it's not specified or negative, a default autoscaling policy will be used."))
 	cmd.Flags().StringVar(&o.Name, "name", "", i18n.T("The name for the newly created object. If not specified, the name of the input resource will be used."))
 	cmdutil.AddDryRunFlag(cmd)
 	cmdutil.AddFilenameOptionFlags(cmd, o.FilenameOptions, "identifying the resource to autoscale.")
@@ -133,11 +131,7 @@ func (o *AutoscaleOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args 
 	o.dryRun = cmdutil.GetFlagBool(cmd, "dry-run")
 	o.createAnnotation = cmdutil.GetFlagBool(cmd, cmdutil.ApplyAnnotationsFlag)
 	o.builder = f.NewBuilder()
-	discoveryClient, err := f.ToDiscoveryClient()
-	if err != nil {
-		return err
-	}
-	o.scaleKindResolver = scale.NewDiscoveryScaleKindResolver(discoveryClient)
+	o.canBeAutoscaled = polymorphichelpers.CanBeAutoscaledFn
 	o.args = args
 	o.RecordFlags.Complete(cmd)
 
@@ -153,17 +147,17 @@ func (o *AutoscaleOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args 
 	o.HPAClient = kubeClient.AutoscalingV1()
 
 	// get the generator
-	o.generatorFunc = func(name string, mapping *meta.RESTMapping) (generate.StructuredGenerator, error) {
+	o.generatorFunc = func(name string, mapping *meta.RESTMapping) (kubectl.StructuredGenerator, error) {
 		switch o.Generator {
-		case generateversioned.HorizontalPodAutoscalerV1GeneratorName:
-			return &generateversioned.HorizontalPodAutoscalerGeneratorV1{
+		case cmdutil.HorizontalPodAutoscalerV1GeneratorName:
+			return &kubectl.HorizontalPodAutoscalerGeneratorV1{
 				Name:               name,
 				MinReplicas:        o.Min,
 				MaxReplicas:        o.Max,
-				CPUPercent:         o.CPUPercent,
+				CPUPercent:         o.CpuPercent,
 				ScaleRefName:       name,
 				ScaleRefKind:       mapping.GroupVersionKind.Kind,
-				ScaleRefAPIVersion: mapping.GroupVersionKind.GroupVersion().String(),
+				ScaleRefApiVersion: mapping.GroupVersionKind.GroupVersion().String(),
 			}, nil
 		default:
 			return nil, cmdutil.UsageErrorf(cmd, "Generator %s not supported. ", o.Generator)
@@ -200,7 +194,7 @@ func (o *AutoscaleOptions) Validate() error {
 
 func (o *AutoscaleOptions) Run() error {
 	r := o.builder.
-		Unstructured().
+		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
 		ContinueOnError().
 		NamespaceParam(o.namespace).DefaultNamespace().
 		FilenameParam(o.enforceNamespace, o.FilenameOptions).
@@ -218,9 +212,8 @@ func (o *AutoscaleOptions) Run() error {
 		}
 
 		mapping := info.ResourceMapping()
-		gvr := mapping.GroupVersionKind.GroupVersion().WithResource(mapping.Resource.Resource)
-		if _, err := o.scaleKindResolver.ScaleForResource(gvr); err != nil {
-			return fmt.Errorf("cannot autoscale a %v: %v", mapping.GroupVersionKind.Kind, err)
+		if err := o.canBeAutoscaled(mapping.GroupVersionKind.GroupKind()); err != nil {
+			return err
 		}
 
 		generator, err := o.generatorFunc(info.Name, mapping)
@@ -239,7 +232,7 @@ func (o *AutoscaleOptions) Run() error {
 		}
 
 		if err := o.Recorder.Record(hpa); err != nil {
-			klog.V(4).Infof("error recording current command: %v", err)
+			glog.V(4).Infof("error recording current command: %v", err)
 		}
 
 		if o.dryRun {

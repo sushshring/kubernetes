@@ -1,4 +1,4 @@
-apiVersion: apps/v1
+apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
   labels:
@@ -6,9 +6,6 @@ metadata:
   name: hostname
 spec:
   minReadySeconds: 60
-  selector:
-    matchLabels:
-      run: hostname
   template:
     metadata:
       labels:

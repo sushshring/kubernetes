@@ -23,7 +23,7 @@ import (
 	"k8s.io/api/core/v1"
 	utilnode "k8s.io/kubernetes/pkg/util/node"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 // NodeTree is a tree-like data structure that holds node names in each zone. Zone names are
@@ -32,7 +32,7 @@ type NodeTree struct {
 	tree      map[string]*nodeArray // a map from zone (region-zone) to an array of nodes in the zone.
 	zones     []string              // a list of all the zones in the tree (keys)
 	zoneIndex int
-	numNodes  int
+	NumNodes  int
 	mu        sync.RWMutex
 }
 
@@ -46,7 +46,7 @@ type nodeArray struct {
 
 func (na *nodeArray) next() (nodeName string, exhausted bool) {
 	if len(na.nodes) == 0 {
-		klog.Error("The nodeArray is empty. It should have been deleted from NodeTree.")
+		glog.Error("The nodeArray is empty. It should have been deleted from NodeTree.")
 		return "", false
 	}
 	if na.lastIndex >= len(na.nodes) {
@@ -81,7 +81,7 @@ func (nt *NodeTree) addNode(n *v1.Node) {
 	if na, ok := nt.tree[zone]; ok {
 		for _, nodeName := range na.nodes {
 			if nodeName == n.Name {
-				klog.Warningf("node %v already exist in the NodeTree", n.Name)
+				glog.Warningf("node %v already exist in the NodeTree", n.Name)
 				return
 			}
 		}
@@ -90,8 +90,8 @@ func (nt *NodeTree) addNode(n *v1.Node) {
 		nt.zones = append(nt.zones, zone)
 		nt.tree[zone] = &nodeArray{nodes: []string{n.Name}, lastIndex: 0}
 	}
-	klog.V(5).Infof("Added node %v in group %v to NodeTree", n.Name, zone)
-	nt.numNodes++
+	glog.V(5).Infof("Added node %v in group %v to NodeTree", n.Name, zone)
+	nt.NumNodes++
 }
 
 // RemoveNode removes a node from the NodeTree.
@@ -110,13 +110,13 @@ func (nt *NodeTree) removeNode(n *v1.Node) error {
 				if len(na.nodes) == 0 {
 					nt.removeZone(zone)
 				}
-				klog.V(5).Infof("Removed node %v in group %v from NodeTree", n.Name, zone)
-				nt.numNodes--
+				glog.V(5).Infof("Removed node %v in group %v from NodeTree", n.Name, zone)
+				nt.NumNodes--
 				return nil
 			}
 		}
 	}
-	klog.Errorf("Node %v in group %v was not found", n.Name, zone)
+	glog.Errorf("Node %v in group %v was not found", n.Name, zone)
 	return fmt.Errorf("node %v in group %v was not found", n.Name, zone)
 }
 
@@ -183,11 +183,4 @@ func (nt *NodeTree) Next() string {
 			return nodeName
 		}
 	}
-}
-
-// NumNodes returns the number of nodes.
-func (nt *NodeTree) NumNodes() int {
-	nt.mu.RLock()
-	defer nt.mu.RUnlock()
-	return nt.numNodes
 }

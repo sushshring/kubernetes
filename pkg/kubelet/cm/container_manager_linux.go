@@ -29,10 +29,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/opencontainers/runc/libcontainer/cgroups"
 	"github.com/opencontainers/runc/libcontainer/cgroups/fs"
 	"github.com/opencontainers/runc/libcontainer/configs"
-	"k8s.io/klog"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -42,9 +42,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/tools/record"
-	internalapi "k8s.io/cri-api/pkg/apis"
 	kubefeatures "k8s.io/kubernetes/pkg/features"
-	podresourcesapi "k8s.io/kubernetes/pkg/kubelet/apis/podresources/v1alpha1"
+	internalapi "k8s.io/kubernetes/pkg/kubelet/apis/cri"
 	"k8s.io/kubernetes/pkg/kubelet/cadvisor"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager"
 	"k8s.io/kubernetes/pkg/kubelet/cm/devicemanager"
@@ -53,15 +52,14 @@ import (
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
 	"k8s.io/kubernetes/pkg/kubelet/qos"
-	"k8s.io/kubernetes/pkg/kubelet/stats/pidlimit"
 	"k8s.io/kubernetes/pkg/kubelet/status"
 	"k8s.io/kubernetes/pkg/kubelet/util/pluginwatcher"
-	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
+	schedulercache "k8s.io/kubernetes/pkg/scheduler/cache"
+	utilfile "k8s.io/kubernetes/pkg/util/file"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/util/oom"
 	"k8s.io/kubernetes/pkg/util/procfs"
 	utilsysctl "k8s.io/kubernetes/pkg/util/sysctl"
-	utilpath "k8s.io/utils/path"
 )
 
 const (
@@ -124,8 +122,6 @@ type containerManagerImpl struct {
 	cgroupManager CgroupManager
 	// Capacity of this node.
 	capacity v1.ResourceList
-	// Capacity of this node, including internal resources.
-	internalCapacity v1.ResourceList
 	// Absolute cgroupfs path to a cgroup that Kubelet needs to place all pods under.
 	// This path include a top level container for enforcing Node Allocatable.
 	cgroupRoot CgroupName
@@ -182,13 +178,13 @@ func validateSystemRequirements(mountUtil mount.Interface) (features, error) {
 
 	// Check if cpu quota is available.
 	// CPU cgroup is required and so it expected to be mounted at this point.
-	periodExists, err := utilpath.Exists(utilpath.CheckFollowSymlink, path.Join(cpuMountPoint, "cpu.cfs_period_us"))
+	periodExists, err := utilfile.FileExists(path.Join(cpuMountPoint, "cpu.cfs_period_us"))
 	if err != nil {
-		klog.Errorf("failed to detect if CPU cgroup cpu.cfs_period_us is available - %v", err)
+		glog.Errorf("failed to detect if CPU cgroup cpu.cfs_period_us is available - %v", err)
 	}
-	quotaExists, err := utilpath.Exists(utilpath.CheckFollowSymlink, path.Join(cpuMountPoint, "cpu.cfs_quota_us"))
+	quotaExists, err := utilfile.FileExists(path.Join(cpuMountPoint, "cpu.cfs_quota_us"))
 	if err != nil {
-		klog.Errorf("failed to detect if CPU cgroup cpu.cfs_quota_us is available - %v", err)
+		glog.Errorf("failed to detect if CPU cgroup cpu.cfs_quota_us is available - %v", err)
 	}
 	if quotaExists && periodExists {
 		f.cpuHardcapping = true
@@ -222,7 +218,6 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 	}
 
 	var capacity = v1.ResourceList{}
-	var internalCapacity = v1.ResourceList{}
 	// It is safe to invoke `MachineInfo` on cAdvisor before logically initializing cAdvisor here because
 	// machine info is computed and cached once as part of cAdvisor object creation.
 	// But `RootFsInfo` and `ImagesFsInfo` are not available at this moment so they will be called later during manager starts
@@ -231,15 +226,6 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 		return nil, err
 	}
 	capacity = cadvisor.CapacityFromMachineInfo(machineInfo)
-	for k, v := range capacity {
-		internalCapacity[k] = v
-	}
-	pidlimits, err := pidlimit.Stats()
-	if err == nil && pidlimits != nil && pidlimits.MaxPID != nil {
-		internalCapacity[pidlimit.PIDs] = *resource.NewQuantity(
-			int64(*pidlimits.MaxPID),
-			resource.DecimalSI)
-	}
 
 	// Turn CgroupRoot from a string (in cgroupfs path format) to internal CgroupName
 	cgroupRoot := ParseCgroupfsToCgroupName(nodeConfig.CgroupRoot)
@@ -258,12 +244,12 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 		if !cgroupManager.Exists(cgroupRoot) {
 			return nil, fmt.Errorf("invalid configuration: cgroup-root %q doesn't exist: %v", cgroupRoot, err)
 		}
-		klog.Infof("container manager verified user specified cgroup-root exists: %v", cgroupRoot)
+		glog.Infof("container manager verified user specified cgroup-root exists: %v", cgroupRoot)
 		// Include the top level cgroup for enforcing node allocatable into cgroup-root.
 		// This way, all sub modules can avoid having to understand the concept of node allocatable.
 		cgroupRoot = NewCgroupName(cgroupRoot, defaultNodeAllocatableCgroupName)
 	}
-	klog.Infof("Creating Container Manager object based on Node Config: %+v", nodeConfig)
+	glog.Infof("Creating Container Manager object based on Node Config: %+v", nodeConfig)
 
 	qosContainerManager, err := NewQOSContainerManager(subsystems, cgroupRoot, nodeConfig, cgroupManager)
 	if err != nil {
@@ -277,13 +263,12 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 		subsystems:          subsystems,
 		cgroupManager:       cgroupManager,
 		capacity:            capacity,
-		internalCapacity:    internalCapacity,
 		cgroupRoot:          cgroupRoot,
 		recorder:            recorder,
 		qosContainerManager: qosContainerManager,
 	}
 
-	klog.Infof("Creating device plugin manager: %t", devicePluginEnabled)
+	glog.Infof("Creating device plugin manager: %t", devicePluginEnabled)
 	if devicePluginEnabled {
 		cm.deviceManager, err = devicemanager.NewManagerImpl()
 	} else {
@@ -303,7 +288,7 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 			nodeConfig.KubeletRootDir,
 		)
 		if err != nil {
-			klog.Errorf("failed to initialize cpu manager: %v", err)
+			glog.Errorf("failed to initialize cpu manager: %v", err)
 			return nil, err
 		}
 	}
@@ -385,9 +370,9 @@ func setupKernelTunables(option KernelTunableBehavior) error {
 		case KernelTunableError:
 			errList = append(errList, fmt.Errorf("Invalid kernel flag: %v, expected value: %v, actual value: %v", flag, expectedValue, val))
 		case KernelTunableWarn:
-			klog.V(2).Infof("Invalid kernel flag: %v, expected value: %v, actual value: %v", flag, expectedValue, val)
+			glog.V(2).Infof("Invalid kernel flag: %v, expected value: %v, actual value: %v", flag, expectedValue, val)
 		case KernelTunableModify:
-			klog.V(2).Infof("Updating kernel flag: %v, expected value: %v, actual value: %v", flag, expectedValue, val)
+			glog.V(2).Infof("Updating kernel flag: %v, expected value: %v, actual value: %v", flag, expectedValue, val)
 			err = sysctl.SetSysctl(flag, expectedValue)
 			if err != nil {
 				errList = append(errList, err)
@@ -439,13 +424,13 @@ func (cm *containerManagerImpl) setupNode(activePods ActivePodsFunc) error {
 		// the cgroup for docker and serve stats for the runtime.
 		// TODO(#27097): Fix this after NodeSpec is clearly defined.
 		cm.periodicTasks = append(cm.periodicTasks, func() {
-			klog.V(4).Infof("[ContainerManager]: Adding periodic tasks for docker CRI integration")
+			glog.V(4).Infof("[ContainerManager]: Adding periodic tasks for docker CRI integration")
 			cont, err := getContainerNameForProcess(dockerProcessName, dockerPidFile)
 			if err != nil {
-				klog.Error(err)
+				glog.Error(err)
 				return
 			}
-			klog.V(2).Infof("[ContainerManager]: Discovered runtime cgroups name: %s", cont)
+			glog.V(2).Infof("[ContainerManager]: Discovered runtime cgroups name: %s", cont)
 			cm.Lock()
 			defer cm.Unlock()
 			cm.RuntimeCgroupsName = cont
@@ -482,12 +467,12 @@ func (cm *containerManagerImpl) setupNode(activePods ActivePodsFunc) error {
 	} else {
 		cm.periodicTasks = append(cm.periodicTasks, func() {
 			if err := ensureProcessInContainerWithOOMScore(os.Getpid(), qos.KubeletOOMScoreAdj, nil); err != nil {
-				klog.Error(err)
+				glog.Error(err)
 				return
 			}
 			cont, err := getContainer(os.Getpid())
 			if err != nil {
-				klog.Errorf("failed to find cgroups of kubelet - %v", err)
+				glog.Errorf("failed to find cgroups of kubelet - %v", err)
 				return
 			}
 			cm.Lock()
@@ -594,7 +579,7 @@ func (cm *containerManagerImpl) Start(node *v1.Node,
 			for _, cont := range cm.systemContainers {
 				if cont.ensureStateFunc != nil {
 					if err := cont.ensureStateFunc(cont.manager); err != nil {
-						klog.Warningf("[ContainerManager] Failed to ensure state of %q: %v", cont.name, err)
+						glog.Warningf("[ContainerManager] Failed to ensure state of %q: %v", cont.name, err)
 					}
 				}
 			}
@@ -642,7 +627,7 @@ func (cm *containerManagerImpl) GetResources(pod *v1.Pod, container *v1.Containe
 	return opts, nil
 }
 
-func (cm *containerManagerImpl) UpdatePluginResources(node *schedulernodeinfo.NodeInfo, attrs *lifecycle.PodAdmitAttributes) error {
+func (cm *containerManagerImpl) UpdatePluginResources(node *schedulercache.NodeInfo, attrs *lifecycle.PodAdmitAttributes) error {
 	return cm.deviceManager.Allocate(node, attrs)
 }
 
@@ -667,12 +652,12 @@ func isProcessRunningInHost(pid int) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("failed to find pid namespace of init process")
 	}
-	klog.V(10).Infof("init pid ns is %q", initPidNs)
+	glog.V(10).Infof("init pid ns is %q", initPidNs)
 	processPidNs, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
 	if err != nil {
 		return false, fmt.Errorf("failed to find pid namespace of process %q", pid)
 	}
-	klog.V(10).Infof("Pid %d pid ns is %q", pid, processPidNs)
+	glog.V(10).Infof("Pid %d pid ns is %q", pid, processPidNs)
 	return initPidNs == processPidNs, nil
 }
 
@@ -714,7 +699,7 @@ func getPidsForProcess(name, pidFile string) ([]int, error) {
 
 	// Return error from getPidFromPidFile since that should have worked
 	// and is the real source of the problem.
-	klog.V(4).Infof("unable to get pid from %s: %v", pidFile, err)
+	glog.V(4).Infof("unable to get pid from %s: %v", pidFile, err)
 	return []int{}, err
 }
 
@@ -752,7 +737,7 @@ func ensureProcessInContainerWithOOMScore(pid int, oomScoreAdj int, manager *fs.
 		return err
 	} else if !runningInHost {
 		// Process is running inside a container. Don't touch that.
-		klog.V(2).Infof("pid %d is not running in the host namespaces", pid)
+		glog.V(2).Infof("pid %d is not running in the host namespaces", pid)
 		return nil
 	}
 
@@ -773,9 +758,9 @@ func ensureProcessInContainerWithOOMScore(pid int, oomScoreAdj int, manager *fs.
 
 	// Also apply oom-score-adj to processes
 	oomAdjuster := oom.NewOOMAdjuster()
-	klog.V(5).Infof("attempting to apply oom_score_adj of %d to pid %d", oomScoreAdj, pid)
+	glog.V(5).Infof("attempting to apply oom_score_adj of %d to pid %d", oomScoreAdj, pid)
 	if err := oomAdjuster.ApplyOOMScoreAdj(pid, oomScoreAdj); err != nil {
-		klog.V(3).Infof("Failed to apply oom_score_adj %d for pid %d: %v", oomScoreAdj, pid, err)
+		glog.V(3).Infof("Failed to apply oom_score_adj %d for pid %d: %v", oomScoreAdj, pid, err)
 		errs = append(errs, fmt.Errorf("failed to apply oom score %d to PID %d: %v", oomScoreAdj, pid, err))
 	}
 	return utilerrors.NewAggregate(errs)
@@ -815,10 +800,10 @@ func getContainer(pid int) (string, error) {
 	// in addition, you would not get memory or cpu accounting for the runtime unless accounting was enabled on its unit (or globally).
 	if systemd, found := cgs["name=systemd"]; found {
 		if systemd != cpu {
-			klog.Warningf("CPUAccounting not enabled for pid: %d", pid)
+			glog.Warningf("CPUAccounting not enabled for pid: %d", pid)
 		}
 		if systemd != memory {
-			klog.Warningf("MemoryAccounting not enabled for pid: %d", pid)
+			glog.Warningf("MemoryAccounting not enabled for pid: %d", pid)
 		}
 		return systemd, nil
 	}
@@ -856,14 +841,14 @@ func ensureSystemCgroups(rootCgroupPath string, manager *fs.Manager) error {
 
 			pids = append(pids, pid)
 		}
-		klog.Infof("Found %d PIDs in root, %d of them are not to be moved", len(allPids), len(allPids)-len(pids))
+		glog.Infof("Found %d PIDs in root, %d of them are not to be moved", len(allPids), len(allPids)-len(pids))
 
 		// Check if we have moved all the non-kernel PIDs.
 		if len(pids) == 0 {
 			break
 		}
 
-		klog.Infof("Moving non-kernel processes: %v", pids)
+		glog.Infof("Moving non-kernel processes: %v", pids)
 		for _, pid := range pids {
 			err := manager.Apply(pid)
 			if err != nil {
@@ -892,8 +877,4 @@ func (cm *containerManagerImpl) GetCapacity() v1.ResourceList {
 
 func (cm *containerManagerImpl) GetDevicePluginResourceCapacity() (v1.ResourceList, v1.ResourceList, []string) {
 	return cm.deviceManager.GetCapacity()
-}
-
-func (cm *containerManagerImpl) GetDevices(podUID, containerName string) []*podresourcesapi.ContainerDevices {
-	return cm.deviceManager.GetDevices(podUID, containerName)
 }

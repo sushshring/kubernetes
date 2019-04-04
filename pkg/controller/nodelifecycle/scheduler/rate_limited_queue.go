@@ -24,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/flowcontrol"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 const (
@@ -236,7 +236,7 @@ func (q *RateLimitedTimedQueue) Try(fn ActionFunc) {
 	for ok {
 		// rate limit the queue checking
 		if !q.limiter.TryAccept() {
-			klog.V(10).Infof("Try rate limited for value: %v", val)
+			glog.V(10).Infof("Try rate limited for value: %v", val)
 			// Try again later
 			break
 		}

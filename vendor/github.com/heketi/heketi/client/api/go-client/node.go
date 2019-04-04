@@ -48,7 +48,6 @@ func (c *Client) NodeAdd(request *api.NodeAddRequest) (*api.NodeInfoResponse, er
 	if err != nil {
 		return nil, err
 	}
-	defer r.Body.Close()
 	if r.StatusCode != http.StatusAccepted {
 		return nil, utils.GetErrorFromResponse(r)
 	}
@@ -65,6 +64,7 @@ func (c *Client) NodeAdd(request *api.NodeAddRequest) (*api.NodeInfoResponse, er
 	// Read JSON response
 	var node api.NodeInfoResponse
 	err = utils.GetJsonFromResponse(r, &node)
+	r.Body.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,6 @@ func (c *Client) NodeInfo(id string) (*api.NodeInfoResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer r.Body.Close()
 	if r.StatusCode != http.StatusOK {
 		return nil, utils.GetErrorFromResponse(r)
 	}
@@ -99,6 +98,7 @@ func (c *Client) NodeInfo(id string) (*api.NodeInfoResponse, error) {
 	// Read JSON response
 	var node api.NodeInfoResponse
 	err = utils.GetJsonFromResponse(r, &node)
+	r.Body.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,6 @@ func (c *Client) NodeDelete(id string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Body.Close()
 	if r.StatusCode != http.StatusAccepted {
 		return utils.GetErrorFromResponse(r)
 	}
@@ -169,7 +168,6 @@ func (c *Client) NodeState(id string, request *api.StateRequest) error {
 	if err != nil {
 		return err
 	}
-	defer r.Body.Close()
 	if r.StatusCode != http.StatusAccepted {
 		return utils.GetErrorFromResponse(r)
 	}
@@ -183,37 +181,5 @@ func (c *Client) NodeState(id string, request *api.StateRequest) error {
 		return utils.GetErrorFromResponse(r)
 	}
 
-	return nil
-}
-
-func (c *Client) NodeSetTags(id string, request *api.TagsChangeRequest) error {
-	buffer, err := json.Marshal(request)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("POST",
-		c.host+"/nodes/"+id+"/tags",
-		bytes.NewBuffer(buffer))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	// Set token
-	err = c.setToken(req)
-	if err != nil {
-		return err
-	}
-
-	// Get info
-	r, err := c.do(req)
-	if err != nil {
-		return err
-	}
-	defer r.Body.Close()
-	if r.StatusCode != http.StatusOK {
-		return utils.GetErrorFromResponse(r)
-	}
 	return nil
 }

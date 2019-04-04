@@ -17,11 +17,7 @@ limitations under the License.
 package utils
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
-	"math/rand"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -224,13 +220,13 @@ func TestVolumeUnmountsFromDeletedPodWithForceOption(c clientset.Interface, f *f
 		Expect(result.Code).To(BeZero(), fmt.Sprintf("Expected grep exit code of 0, got %d", result.Code))
 	}
 
-	// This command is to make sure kubelet is started after test finishes no matter it fails or not.
-	defer func() {
-		KubeletCommand(KStart, c, clientPod)
-	}()
 	By("Stopping the kubelet.")
 	KubeletCommand(KStop, c, clientPod)
-
+	defer func() {
+		if err != nil {
+			KubeletCommand(KStart, c, clientPod)
+		}
+	}()
 	By(fmt.Sprintf("Deleting Pod %q", clientPod.Name))
 	if forceDelete {
 		err = c.CoreV1().Pods(clientPod.Namespace).Delete(clientPod.Name, metav1.NewDeleteOptions(0))
@@ -342,7 +338,7 @@ func StartExternalProvisioner(c clientset.Interface, ns string, externalPluginNa
 			Containers: []v1.Container{
 				{
 					Name:  "nfs-provisioner",
-					Image: "quay.io/kubernetes_incubator/nfs-provisioner:v2.2.0-k8s1.12",
+					Image: "quay.io/kubernetes_incubator/nfs-provisioner:v2.1.0-k8s1.11",
 					SecurityContext: &v1.SecurityContext{
 						Capabilities: &v1.Capabilities{
 							Add: []v1.Capability{"DAC_READ_SEARCH"},
@@ -444,86 +440,4 @@ func PrivilegedTestPSPClusterRoleBinding(client clientset.Interface,
 		framework.ExpectNoError(err, "Failed to create %s role binding: %v", binding.GetName(), err)
 
 	}
-}
-
-func CheckVolumeModeOfPath(pod *v1.Pod, volMode v1.PersistentVolumeMode, path string) {
-	if volMode == v1.PersistentVolumeBlock {
-		// Check if block exists
-		VerifyExecInPodSucceed(pod, fmt.Sprintf("test -b %s", path))
-
-		// Double check that it's not directory
-		VerifyExecInPodFail(pod, fmt.Sprintf("test -d %s", path), 1)
-	} else {
-		// Check if directory exists
-		VerifyExecInPodSucceed(pod, fmt.Sprintf("test -d %s", path))
-
-		// Double check that it's not block
-		VerifyExecInPodFail(pod, fmt.Sprintf("test -b %s", path), 1)
-	}
-}
-
-func CheckReadWriteToPath(pod *v1.Pod, volMode v1.PersistentVolumeMode, path string) {
-	if volMode == v1.PersistentVolumeBlock {
-		// random -> file1
-		VerifyExecInPodSucceed(pod, "dd if=/dev/urandom of=/tmp/file1 bs=64 count=1")
-		// file1 -> dev (write to dev)
-		VerifyExecInPodSucceed(pod, fmt.Sprintf("dd if=/tmp/file1 of=%s bs=64 count=1", path))
-		// dev -> file2 (read from dev)
-		VerifyExecInPodSucceed(pod, fmt.Sprintf("dd if=%s of=/tmp/file2 bs=64 count=1", path))
-		// file1 == file2 (check contents)
-		VerifyExecInPodSucceed(pod, "diff /tmp/file1 /tmp/file2")
-		// Clean up temp files
-		VerifyExecInPodSucceed(pod, "rm -f /tmp/file1 /tmp/file2")
-
-		// Check that writing file to block volume fails
-		VerifyExecInPodFail(pod, fmt.Sprintf("echo 'Hello world.' > %s/file1.txt", path), 1)
-	} else {
-		// text -> file1 (write to file)
-		VerifyExecInPodSucceed(pod, fmt.Sprintf("echo 'Hello world.' > %s/file1.txt", path))
-		// grep file1 (read from file and check contents)
-		VerifyExecInPodSucceed(pod, fmt.Sprintf("grep 'Hello world.' %s/file1.txt", path))
-
-		// Check that writing to directory as block volume fails
-		VerifyExecInPodFail(pod, fmt.Sprintf("dd if=/dev/urandom of=%s bs=64 count=1", path), 1)
-	}
-}
-
-func genBinDataFromSeed(len int, seed int64) []byte {
-	binData := make([]byte, len)
-	rand.Seed(seed)
-
-	len, err := rand.Read(binData)
-	if err != nil {
-		fmt.Printf("Error: %v", err)
-	}
-
-	return binData
-}
-
-func CheckReadFromPath(pod *v1.Pod, volMode v1.PersistentVolumeMode, path string, len int, seed int64) {
-	var pathForVolMode string
-	if volMode == v1.PersistentVolumeBlock {
-		pathForVolMode = path
-	} else {
-		pathForVolMode = filepath.Join(path, "file1.txt")
-	}
-
-	sum := sha256.Sum256(genBinDataFromSeed(len, seed))
-
-	VerifyExecInPodSucceed(pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum", pathForVolMode, len))
-	VerifyExecInPodSucceed(pod, fmt.Sprintf("dd if=%s bs=%d count=1 | sha256sum | grep -Fq %x", pathForVolMode, len, sum))
-}
-
-func CheckWriteToPath(pod *v1.Pod, volMode v1.PersistentVolumeMode, path string, len int, seed int64) {
-	var pathForVolMode string
-	if volMode == v1.PersistentVolumeBlock {
-		pathForVolMode = path
-	} else {
-		pathForVolMode = filepath.Join(path, "file1.txt")
-	}
-
-	encoded := base64.StdEncoding.EncodeToString(genBinDataFromSeed(len, seed))
-
-	VerifyExecInPodSucceed(pod, fmt.Sprintf("echo %s | base64 -d | sha256sum", encoded))
-	VerifyExecInPodSucceed(pod, fmt.Sprintf("echo %s | base64 -d | dd of=%s bs=%d count=1", encoded, pathForVolMode, len))
 }

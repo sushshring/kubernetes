@@ -8,17 +8,13 @@ load(
 
 go_test(
     name = "go_default_test",
-    srcs = [
-        "conditional_validation_test.go",
-        "validation_test.go",
-    ],
+    srcs = ["validation_test.go"],
     embed = [":go_default_library"],
     deps = [
         "//pkg/apis/core:go_default_library",
         "//pkg/apis/networking:go_default_library",
         "//pkg/features:go_default_library",
         "//staging/src/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
-        "//staging/src/k8s.io/apimachinery/pkg/util/diff:go_default_library",
         "//staging/src/k8s.io/apimachinery/pkg/util/intstr:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/util/feature:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/util/feature/testing:go_default_library",
@@ -27,10 +23,7 @@ go_test(
 
 go_library(
     name = "go_default_library",
-    srcs = [
-        "conditional_validation.go",
-        "validation.go",
-    ],
+    srcs = ["validation.go"],
     importpath = "k8s.io/kubernetes/pkg/apis/networking/validation",
     deps = [
         "//pkg/apis/core:go_default_library",

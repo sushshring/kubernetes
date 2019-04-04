@@ -24,7 +24,7 @@ import (
 	info "github.com/google/cadvisor/info/v1"
 	"github.com/google/cadvisor/utils"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 type byTimestamp []*info.Event
@@ -322,7 +322,7 @@ func (self *events) AddEvent(e *info.Event) error {
 	for _, watchObject := range watchesToSend {
 		watchObject.eventChannel.GetChannel() <- e
 	}
-	klog.V(4).Infof("Added event %v", e)
+	glog.V(4).Infof("Added event %v", e)
 	return nil
 }
 
@@ -332,7 +332,7 @@ func (self *events) StopWatch(watchId int) {
 	defer self.watcherLock.Unlock()
 	_, ok := self.watchers[watchId]
 	if !ok {
-		klog.Errorf("Could not find watcher instance %v", watchId)
+		glog.Errorf("Could not find watcher instance %v", watchId)
 	}
 	close(self.watchers[watchId].eventChannel.GetChannel())
 	delete(self.watchers, watchId)

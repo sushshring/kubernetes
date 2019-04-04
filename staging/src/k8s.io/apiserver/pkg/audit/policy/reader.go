@@ -28,7 +28,7 @@ import (
 	"k8s.io/apiserver/pkg/apis/audit/validation"
 	"k8s.io/apiserver/pkg/audit"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 var (
@@ -85,6 +85,6 @@ func LoadPolicyFromBytes(policyDef []byte) (*auditinternal.Policy, error) {
 	if policyCnt == 0 {
 		return nil, fmt.Errorf("loaded illegal policy with 0 rules")
 	}
-	klog.V(4).Infof("Loaded %d audit policy rules", policyCnt)
+	glog.V(4).Infof("Loaded %d audit policy rules", policyCnt)
 	return policy, nil
 }

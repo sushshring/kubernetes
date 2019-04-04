@@ -59,106 +59,6 @@ rules:
 		"audit.k8s.io/v1":      auditv1.SchemeGroupVersion,
 		"audit.k8s.io/v1beta1": auditv1beta1.SchemeGroupVersion,
 	}
-
-	expectedEvents = []utils.AuditEvent{
-		{
-			Level:             auditinternal.LevelRequestResponse,
-			Stage:             auditinternal.StageResponseComplete,
-			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps", namespace),
-			Verb:              "create",
-			Code:              201,
-			User:              auditTestUser,
-			Resource:          "configmaps",
-			Namespace:         namespace,
-			RequestObject:     true,
-			ResponseObject:    true,
-			AuthorizeDecision: "allow",
-		}, {
-			Level:             auditinternal.LevelRequestResponse,
-			Stage:             auditinternal.StageResponseComplete,
-			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps/audit-configmap", namespace),
-			Verb:              "get",
-			Code:              200,
-			User:              auditTestUser,
-			Resource:          "configmaps",
-			Namespace:         namespace,
-			RequestObject:     false,
-			ResponseObject:    true,
-			AuthorizeDecision: "allow",
-		}, {
-			Level:             auditinternal.LevelRequestResponse,
-			Stage:             auditinternal.StageResponseComplete,
-			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps", namespace),
-			Verb:              "list",
-			Code:              200,
-			User:              auditTestUser,
-			Resource:          "configmaps",
-			Namespace:         namespace,
-			RequestObject:     false,
-			ResponseObject:    true,
-			AuthorizeDecision: "allow",
-		}, {
-			Level:             auditinternal.LevelRequestResponse,
-			Stage:             auditinternal.StageResponseStarted,
-			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps?timeout=%ds&timeoutSeconds=%d&watch=true", namespace, watchTestTimeout, watchTestTimeout),
-			Verb:              "watch",
-			Code:              200,
-			User:              auditTestUser,
-			Resource:          "configmaps",
-			Namespace:         namespace,
-			RequestObject:     false,
-			ResponseObject:    false,
-			AuthorizeDecision: "allow",
-		}, {
-			Level:             auditinternal.LevelRequestResponse,
-			Stage:             auditinternal.StageResponseComplete,
-			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps?timeout=%ds&timeoutSeconds=%d&watch=true", namespace, watchTestTimeout, watchTestTimeout),
-			Verb:              "watch",
-			Code:              200,
-			User:              auditTestUser,
-			Resource:          "configmaps",
-			Namespace:         namespace,
-			RequestObject:     false,
-			ResponseObject:    false,
-			AuthorizeDecision: "allow",
-		}, {
-			Level:             auditinternal.LevelRequestResponse,
-			Stage:             auditinternal.StageResponseComplete,
-			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps/audit-configmap", namespace),
-			Verb:              "update",
-			Code:              200,
-			User:              auditTestUser,
-			Resource:          "configmaps",
-			Namespace:         namespace,
-			RequestObject:     true,
-			ResponseObject:    true,
-			AuthorizeDecision: "allow",
-		}, {
-			Level:             auditinternal.LevelRequestResponse,
-			Stage:             auditinternal.StageResponseComplete,
-			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps/audit-configmap", namespace),
-			Verb:              "patch",
-			Code:              200,
-			User:              auditTestUser,
-			Resource:          "configmaps",
-			Namespace:         namespace,
-			RequestObject:     true,
-			ResponseObject:    true,
-			AuthorizeDecision: "allow",
-		}, {
-			Level:             auditinternal.LevelRequestResponse,
-			Stage:             auditinternal.StageResponseComplete,
-			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps/audit-configmap", namespace),
-			Verb:              "delete",
-			Code:              200,
-			User:              auditTestUser,
-			Resource:          "configmaps",
-			Namespace:         namespace,
-			RequestObject:     true,
-			ResponseObject:    true,
-			AuthorizeDecision: "allow",
-		},
-	}
 )
 
 // TestAudit ensures that both v1beta1 and v1 version audit api could work.
@@ -205,63 +105,156 @@ func testAudit(t *testing.T, version string) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	// perform configmap operations
-	configMapOperations(t, kubeclient)
+	func() {
+		// create, get, watch, update, patch, list and delete configmap.
+		configMap := &apiv1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "audit-configmap",
+			},
+			Data: map[string]string{
+				"map-key": "map-value",
+			},
+		}
 
-	// check for corresponding audit logs
+		_, err := kubeclient.CoreV1().ConfigMaps(namespace).Create(configMap)
+		expectNoError(t, err, "failed to create audit-configmap")
+
+		_, err = kubeclient.CoreV1().ConfigMaps(namespace).Get(configMap.Name, metav1.GetOptions{})
+		expectNoError(t, err, "failed to get audit-configmap")
+
+		configMapChan, err := kubeclient.CoreV1().ConfigMaps(namespace).Watch(watchOptions)
+		expectNoError(t, err, "failed to create watch for config maps")
+		for range configMapChan.ResultChan() {
+			// Block until watchOptions.TimeoutSeconds expires.
+			// If the test finishes before watchOptions.TimeoutSeconds expires, the watch audit
+			// event at stage ResponseComplete will not be generated.
+		}
+
+		_, err = kubeclient.CoreV1().ConfigMaps(namespace).Update(configMap)
+		expectNoError(t, err, "failed to update audit-configmap")
+
+		_, err = kubeclient.CoreV1().ConfigMaps(namespace).Patch(configMap.Name, types.JSONPatchType, patch)
+		expectNoError(t, err, "failed to patch configmap")
+
+		_, err = kubeclient.CoreV1().ConfigMaps(namespace).List(metav1.ListOptions{})
+		expectNoError(t, err, "failed to list config maps")
+
+		err = kubeclient.CoreV1().ConfigMaps(namespace).Delete(configMap.Name, &metav1.DeleteOptions{})
+		expectNoError(t, err, "failed to delete audit-configmap")
+	}()
+
+	expectedEvents := []utils.AuditEvent{
+		{
+			Level:             auditinternal.LevelRequestResponse,
+			Stage:             auditinternal.StageResponseComplete,
+			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps", namespace),
+			Verb:              "create",
+			Code:              201,
+			User:              auditTestUser,
+			Resource:          "configmaps",
+			Namespace:         namespace,
+			RequestObject:     true,
+			ResponseObject:    true,
+			AuthorizeDecision: "allow",
+		}, {
+			Level:             auditinternal.LevelRequestResponse,
+			Stage:             auditinternal.StageResponseComplete,
+			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps/audit-configmap", namespace),
+			Verb:              "get",
+			Code:              200,
+			User:              auditTestUser,
+			Resource:          "configmaps",
+			Namespace:         namespace,
+			RequestObject:     false,
+			ResponseObject:    true,
+			AuthorizeDecision: "allow",
+		}, {
+			Level:             auditinternal.LevelRequestResponse,
+			Stage:             auditinternal.StageResponseComplete,
+			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps", namespace),
+			Verb:              "list",
+			Code:              200,
+			User:              auditTestUser,
+			Resource:          "configmaps",
+			Namespace:         namespace,
+			RequestObject:     false,
+			ResponseObject:    true,
+			AuthorizeDecision: "allow",
+		}, {
+			Level:             auditinternal.LevelRequestResponse,
+			Stage:             auditinternal.StageResponseStarted,
+			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps?timeoutSeconds=%d&watch=true", namespace, watchTestTimeout),
+			Verb:              "watch",
+			Code:              200,
+			User:              auditTestUser,
+			Resource:          "configmaps",
+			Namespace:         namespace,
+			RequestObject:     false,
+			ResponseObject:    false,
+			AuthorizeDecision: "allow",
+		}, {
+			Level:             auditinternal.LevelRequestResponse,
+			Stage:             auditinternal.StageResponseComplete,
+			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps?timeoutSeconds=%d&watch=true", namespace, watchTestTimeout),
+			Verb:              "watch",
+			Code:              200,
+			User:              auditTestUser,
+			Resource:          "configmaps",
+			Namespace:         namespace,
+			RequestObject:     false,
+			ResponseObject:    false,
+			AuthorizeDecision: "allow",
+		}, {
+			Level:             auditinternal.LevelRequestResponse,
+			Stage:             auditinternal.StageResponseComplete,
+			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps/audit-configmap", namespace),
+			Verb:              "update",
+			Code:              200,
+			User:              auditTestUser,
+			Resource:          "configmaps",
+			Namespace:         namespace,
+			RequestObject:     true,
+			ResponseObject:    true,
+			AuthorizeDecision: "allow",
+		}, {
+			Level:             auditinternal.LevelRequestResponse,
+			Stage:             auditinternal.StageResponseComplete,
+			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps/audit-configmap", namespace),
+			Verb:              "patch",
+			Code:              200,
+			User:              auditTestUser,
+			Resource:          "configmaps",
+			Namespace:         namespace,
+			RequestObject:     true,
+			ResponseObject:    true,
+			AuthorizeDecision: "allow",
+		}, {
+			Level:             auditinternal.LevelRequestResponse,
+			Stage:             auditinternal.StageResponseComplete,
+			RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/configmaps/audit-configmap", namespace),
+			Verb:              "delete",
+			Code:              200,
+			User:              auditTestUser,
+			Resource:          "configmaps",
+			Namespace:         namespace,
+			RequestObject:     true,
+			ResponseObject:    true,
+			AuthorizeDecision: "allow",
+		},
+	}
+
 	stream, err := os.Open(logFile.Name())
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 	defer stream.Close()
-	missingReport, err := utils.CheckAuditLines(stream, expectedEvents, versions[version])
+	missing, err := utils.CheckAuditLines(stream, expectedEvents, versions[version])
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if len(missingReport.MissingEvents) > 0 {
-		t.Errorf(missingReport.String())
+	if len(missing) > 0 {
+		t.Errorf("Failed to match all expected events, events %#v not found!", missing)
 	}
-}
-
-// configMapOperations is a set of known operations performed on the configmap type
-// which correspond to the expected events.
-// This is shared by the dynamic test
-func configMapOperations(t *testing.T, kubeclient kubernetes.Interface) {
-	// create, get, watch, update, patch, list and delete configmap.
-	configMap := &apiv1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "audit-configmap",
-		},
-		Data: map[string]string{
-			"map-key": "map-value",
-		},
-	}
-
-	_, err := kubeclient.CoreV1().ConfigMaps(namespace).Create(configMap)
-	expectNoError(t, err, "failed to create audit-configmap")
-
-	_, err = kubeclient.CoreV1().ConfigMaps(namespace).Get(configMap.Name, metav1.GetOptions{})
-	expectNoError(t, err, "failed to get audit-configmap")
-
-	configMapChan, err := kubeclient.CoreV1().ConfigMaps(namespace).Watch(watchOptions)
-	expectNoError(t, err, "failed to create watch for config maps")
-	for range configMapChan.ResultChan() {
-		// Block until watchOptions.TimeoutSeconds expires.
-		// If the test finishes before watchOptions.TimeoutSeconds expires, the watch audit
-		// event at stage ResponseComplete will not be generated.
-	}
-
-	_, err = kubeclient.CoreV1().ConfigMaps(namespace).Update(configMap)
-	expectNoError(t, err, "failed to update audit-configmap")
-
-	_, err = kubeclient.CoreV1().ConfigMaps(namespace).Patch(configMap.Name, types.JSONPatchType, patch)
-	expectNoError(t, err, "failed to patch configmap")
-
-	_, err = kubeclient.CoreV1().ConfigMaps(namespace).List(metav1.ListOptions{})
-	expectNoError(t, err, "failed to list config maps")
-
-	err = kubeclient.CoreV1().ConfigMaps(namespace).Delete(configMap.Name, &metav1.DeleteOptions{})
-	expectNoError(t, err, "failed to delete audit-configmap")
 }
 
 func expectNoError(t *testing.T, err error, msg string) {

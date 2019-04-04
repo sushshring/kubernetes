@@ -19,10 +19,13 @@ package azure
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -30,10 +33,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	servicehelpers "k8s.io/cloud-provider/service/helpers"
+	serviceapi "k8s.io/kubernetes/pkg/api/v1/service"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure/auth"
+	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-04-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2017-09-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/stretchr/testify/assert"
@@ -64,7 +68,6 @@ func TestParseConfig(t *testing.T) {
 		"primaryScaleSetName": "primaryScaleSetName",
 		"resourceGroup": "resourceGroup",
 		"routeTableName": "routeTableName",
-		"routeTableResourceGroup": "routeTableResourceGroup",
 		"securityGroupName": "securityGroupName",
 		"subnetName": "subnetName",
 		"subscriptionId": "subscriptionId",
@@ -100,9 +103,8 @@ func TestParseConfig(t *testing.T) {
 		MaximumLoadBalancerRuleCount:      1,
 		PrimaryAvailabilitySetName:        "primaryAvailabilitySetName",
 		PrimaryScaleSetName:               "primaryScaleSetName",
-		ResourceGroup:                     "resourcegroup",
+		ResourceGroup:                     "resourceGroup",
 		RouteTableName:                    "routeTableName",
-		RouteTableResourceGroup:           "routeTableResourceGroup",
 		SecurityGroupName:                 "securityGroupName",
 		SubnetName:                        "subnetName",
 		UseInstanceMetadata:               true,
@@ -859,13 +861,13 @@ func TestReconcilePublicIPWithNewService(t *testing.T) {
 	az := getTestCloud()
 	svc := getTestService("servicea", v1.ProtocolTCP, 80, 443)
 
-	pip, err := az.reconcilePublicIP(testClusterName, &svc, nil, true /* wantLb*/)
+	pip, err := az.reconcilePublicIP(testClusterName, &svc, true /* wantLb*/)
 	if err != nil {
 		t.Errorf("Unexpected error: %q", err)
 	}
 	validatePublicIP(t, pip, &svc, true)
 
-	pip2, err := az.reconcilePublicIP(testClusterName, &svc, nil, true /* wantLb */)
+	pip2, err := az.reconcilePublicIP(testClusterName, &svc, true /* wantLb */)
 	if err != nil {
 		t.Errorf("Unexpected error: %q", err)
 	}
@@ -880,7 +882,7 @@ func TestReconcilePublicIPRemoveService(t *testing.T) {
 	az := getTestCloud()
 	svc := getTestService("servicea", v1.ProtocolTCP, 80, 443)
 
-	pip, err := az.reconcilePublicIP(testClusterName, &svc, nil, true /* wantLb*/)
+	pip, err := az.reconcilePublicIP(testClusterName, &svc, true /* wantLb*/)
 	if err != nil {
 		t.Errorf("Unexpected error: %q", err)
 	}
@@ -888,7 +890,7 @@ func TestReconcilePublicIPRemoveService(t *testing.T) {
 	validatePublicIP(t, pip, &svc, true)
 
 	// Remove the service
-	pip, err = az.reconcilePublicIP(testClusterName, &svc, nil, false /* wantLb */)
+	pip, err = az.reconcilePublicIP(testClusterName, &svc, false /* wantLb */)
 	if err != nil {
 		t.Errorf("Unexpected error: %q", err)
 	}
@@ -900,7 +902,7 @@ func TestReconcilePublicIPWithInternalService(t *testing.T) {
 	az := getTestCloud()
 	svc := getInternalTestService("servicea", 80, 443)
 
-	pip, err := az.reconcilePublicIP(testClusterName, &svc, nil, true /* wantLb*/)
+	pip, err := az.reconcilePublicIP(testClusterName, &svc, true /* wantLb*/)
 	if err != nil {
 		t.Errorf("Unexpected error: %q", err)
 	}
@@ -912,7 +914,7 @@ func TestReconcilePublicIPWithExternalAndInternalSwitch(t *testing.T) {
 	az := getTestCloud()
 	svc := getInternalTestService("servicea", 80, 443)
 
-	pip, err := az.reconcilePublicIP(testClusterName, &svc, nil, true /* wantLb*/)
+	pip, err := az.reconcilePublicIP(testClusterName, &svc, true /* wantLb*/)
 	if err != nil {
 		t.Errorf("Unexpected error: %q", err)
 	}
@@ -920,14 +922,14 @@ func TestReconcilePublicIPWithExternalAndInternalSwitch(t *testing.T) {
 
 	// Update to external service
 	svcUpdated := getTestService("servicea", v1.ProtocolTCP, 80)
-	pip, err = az.reconcilePublicIP(testClusterName, &svcUpdated, nil, true /* wantLb*/)
+	pip, err = az.reconcilePublicIP(testClusterName, &svcUpdated, true /* wantLb*/)
 	if err != nil {
 		t.Errorf("Unexpected error: %q", err)
 	}
 	validatePublicIP(t, pip, &svcUpdated, true)
 
 	// Update to internal service again
-	pip, err = az.reconcilePublicIP(testClusterName, &svc, nil, true /* wantLb*/)
+	pip, err = az.reconcilePublicIP(testClusterName, &svc, true /* wantLb*/)
 	if err != nil {
 		t.Errorf("Unexpected error: %q", err)
 	}
@@ -943,7 +945,6 @@ func getTestCloud() (az *Cloud) {
 			},
 			ResourceGroup:                "rg",
 			VnetResourceGroup:            "rg",
-			RouteTableResourceGroup:      "rg",
 			Location:                     "westus",
 			VnetName:                     "vnet",
 			SubnetName:                   "subnet",
@@ -1095,7 +1096,7 @@ func getClusterResources(az *Cloud, vmCount int, availabilitySetCount int) (clus
 			ObjectMeta: metav1.ObjectMeta{
 				Name: vmName,
 				Labels: map[string]string{
-					v1.LabelHostname: vmName,
+					kubeletapis.LabelHostname: vmName,
 				},
 			},
 		}
@@ -1137,13 +1138,6 @@ func getTestService(identifier string, proto v1.Protocol, requestedPorts ...int3
 func getInternalTestService(identifier string, requestedPorts ...int32) v1.Service {
 	svc := getTestService(identifier, v1.ProtocolTCP, requestedPorts...)
 	svc.Annotations[ServiceAnnotationLoadBalancerInternal] = "true"
-	return svc
-}
-
-func getResourceGroupTestService(identifier, resourceGroup, loadBalancerIP string, requestedPorts ...int32) v1.Service {
-	svc := getTestService(identifier, v1.ProtocolTCP, requestedPorts...)
-	svc.Spec.LoadBalancerIP = loadBalancerIP
-	svc.Annotations[ServiceAnnotationLoadBalancerResourceGroup] = resourceGroup
 	return svc
 }
 
@@ -1219,7 +1213,7 @@ func validateLoadBalancer(t *testing.T, loadBalancer *network.LoadBalancer, serv
 		}
 		for _, wantedRule := range svc.Spec.Ports {
 			expectedRuleCount++
-			wantedRuleName := az.getLoadBalancerRuleName(&svc, wantedRule.Protocol, wantedRule.Port, subnet(&svc))
+			wantedRuleName := az.getLoadBalancerRuleName(&svc, wantedRule, subnet(&svc))
 			foundRule := false
 			for _, actualRule := range *loadBalancer.LoadBalancingRules {
 				if strings.EqualFold(*actualRule.Name, wantedRuleName) &&
@@ -1240,8 +1234,8 @@ func validateLoadBalancer(t *testing.T, loadBalancer *network.LoadBalancer, serv
 
 			expectedProbeCount++
 			foundProbe := false
-			if servicehelpers.NeedsHealthCheck(&svc) {
-				path, port := servicehelpers.GetServiceHealthCheckPathPort(&svc)
+			if serviceapi.NeedsHealthCheck(&svc) {
+				path, port := serviceapi.GetServiceHealthCheckPathPort(&svc)
 				for _, actualProbe := range *loadBalancer.Probes {
 					if strings.EqualFold(*actualProbe.Name, wantedRuleName) &&
 						*actualProbe.Port == port &&
@@ -1527,7 +1521,6 @@ func TestNewCloudFromJSON(t *testing.T) {
 		"aadClientCertPath": "--aad-client-cert-path--",
 		"aadClientCertPassword": "--aad-client-cert-password--",
 		"resourceGroup": "--resource-group--",
-		"routeTableResourceGroup": "--route-table-resource-group--",
 		"location": "--location--",
 		"subnetName": "--subnet-name--",
 		"securityGroupName": "--security-group-name--",
@@ -1561,8 +1554,7 @@ aadClientSecret: --aad-client-secret--
 	validateEmptyConfig(t, config)
 }
 
-// Test Configuration deserialization (yaml) without
-// specific resource group for the route table
+// Test Configuration deserialization (yaml)
 func TestNewCloudFromYAML(t *testing.T) {
 	config := `
 tenantId: --tenant-id--
@@ -1572,7 +1564,6 @@ aadClientSecret: --aad-client-secret--
 aadClientCertPath: --aad-client-cert-path--
 aadClientCertPassword: --aad-client-cert-password--
 resourceGroup: --resource-group--
-routeTableResourceGroup: --route-table-resource-group--
 location: --location--
 subnetName: --subnet-name--
 securityGroupName: --security-group-name--
@@ -1614,9 +1605,6 @@ func validateConfig(t *testing.T, config string) {
 	}
 	if azureCloud.ResourceGroup != "--resource-group--" {
 		t.Errorf("got incorrect value for ResourceGroup")
-	}
-	if azureCloud.RouteTableResourceGroup != "--route-table-resource-group--" {
-		t.Errorf("got incorrect value for RouteTableResourceGroup")
 	}
 	if azureCloud.Location != "--location--" {
 		t.Errorf("got incorrect value for Location")
@@ -1692,9 +1680,9 @@ func validateEmptyConfig(t *testing.T, config string) {
 func TestGetZone(t *testing.T) {
 	cloud := &Cloud{
 		Config: Config{
-			Location:            "eastus",
-			UseInstanceMetadata: true,
+			Location: "eastus",
 		},
+		metadata: &InstanceMetadata{},
 	}
 	testcases := []struct {
 		name        string
@@ -1727,19 +1715,18 @@ func TestGetZone(t *testing.T) {
 		}
 
 		mux := http.NewServeMux()
-		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintf(w, fmt.Sprintf(`{"compute":{"zone":"%s", "platformFaultDomain":"%s"}}`, test.zone, test.faultDomain))
+		mux.Handle("/v1/InstanceInfo/FD", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, test.faultDomain)
+		}))
+		mux.Handle("/instance/compute", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, fmt.Sprintf("{\"zone\":\"%s\"}", test.zone))
 		}))
 		go func() {
 			http.Serve(listener, mux)
 		}()
 		defer listener.Close()
 
-		cloud.metadata, err = NewInstanceMetadataService("http://" + listener.Addr().String() + "/")
-		if err != nil {
-			t.Errorf("Test [%s] unexpected error: %v", test.name, err)
-		}
-
+		cloud.metadata.baseURL = "http://" + listener.Addr().String() + "/"
 		zone, err := cloud.GetZone(context.Background())
 		if err != nil {
 			t.Errorf("Test [%s] unexpected error: %v", test.name, err)
@@ -1750,6 +1737,29 @@ func TestGetZone(t *testing.T) {
 		if zone.Region != cloud.Location {
 			t.Errorf("Test [%s] unexpected region: %s, expected: %s", test.name, zone.Region, cloud.Location)
 		}
+	}
+}
+
+func TestFetchFaultDomain(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "99")
+	}))
+	defer ts.Close()
+
+	cloud := &Cloud{}
+	cloud.metadata = &InstanceMetadata{
+		baseURL: ts.URL + "/",
+	}
+
+	faultDomain, err := cloud.fetchFaultDomain()
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if faultDomain == nil {
+		t.Errorf("Unexpected nil fault domain")
+	}
+	if *faultDomain != "99" {
+		t.Errorf("Expected '99', saw '%s'", *faultDomain)
 	}
 }
 
@@ -1802,6 +1812,73 @@ func TestGetNodeNameByProviderID(t *testing.T) {
 			t.Errorf("Expected %v, but got %v", test.name, name)
 		}
 
+	}
+}
+
+func TestMetadataURLGeneration(t *testing.T) {
+	metadata := NewInstanceMetadata()
+	fullPath := metadata.makeMetadataURL("some/path")
+	if fullPath != "http://169.254.169.254/metadata/some/path" {
+		t.Errorf("Expected http://169.254.169.254/metadata/some/path saw %s", fullPath)
+	}
+}
+
+func TestMetadataParsing(t *testing.T) {
+	data := `
+{
+    "interface": [
+      {
+        "ipv4": {
+          "ipAddress": [
+            {
+              "privateIpAddress": "10.0.1.4",
+              "publicIpAddress": "X.X.X.X"
+            }
+          ],
+          "subnet": [
+            {
+              "address": "10.0.1.0",
+              "prefix": "24"
+            }
+          ]
+        },
+        "ipv6": {
+          "ipAddress": [
+
+          ]
+        },
+        "macAddress": "002248020E1E"
+      }
+    ]
+}
+`
+
+	network := NetworkMetadata{}
+	if err := json.Unmarshal([]byte(data), &network); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	ip := network.Interface[0].IPV4.IPAddress[0].PrivateIP
+	if ip != "10.0.1.4" {
+		t.Errorf("Unexpected value: %s, expected 10.0.1.4", ip)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, data)
+	}))
+	defer server.Close()
+
+	metadata := &InstanceMetadata{
+		baseURL: server.URL,
+	}
+
+	networkJSON := NetworkMetadata{}
+	if err := metadata.Object("/some/path", &networkJSON); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if !reflect.DeepEqual(network, networkJSON) {
+		t.Errorf("Unexpected inequality:\n%#v\nvs\n%#v", network, networkJSON)
 	}
 }
 

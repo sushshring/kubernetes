@@ -36,41 +36,34 @@ var (
 		kubectl api-versions`))
 )
 
-// APIVersionsOptions have the data required for API versions
-type APIVersionsOptions struct {
+type ApiVersionsOptions struct {
 	discoveryClient discovery.CachedDiscoveryInterface
 
 	genericclioptions.IOStreams
 }
 
-// NewAPIVersionsOptions creates the options for APIVersions
-func NewAPIVersionsOptions(ioStreams genericclioptions.IOStreams) *APIVersionsOptions {
-	return &APIVersionsOptions{
+func NewApiVersionsOptions(ioStreams genericclioptions.IOStreams) *ApiVersionsOptions {
+	return &ApiVersionsOptions{
 		IOStreams: ioStreams,
 	}
 }
 
-// NewCmdAPIVersions creates the `api-versions` command
-func NewCmdAPIVersions(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
-	o := NewAPIVersionsOptions(ioStreams)
+func NewCmdApiVersions(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
+	o := NewApiVersionsOptions(ioStreams)
 	cmd := &cobra.Command{
 		Use:     "api-versions",
 		Short:   "Print the supported API versions on the server, in the form of \"group/version\"",
 		Long:    "Print the supported API versions on the server, in the form of \"group/version\"",
 		Example: apiversionsExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			cmdutil.CheckErr(o.Complete(f, cmd, args))
-			cmdutil.CheckErr(o.RunAPIVersions())
+			cmdutil.CheckErr(o.Complete(f))
+			cmdutil.CheckErr(o.RunApiVersions())
 		},
 	}
 	return cmd
 }
 
-// Complete adapts from the command line args and factory to the data required
-func (o *APIVersionsOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []string) error {
-	if len(args) != 0 {
-		return cmdutil.UsageErrorf(cmd, "unexpected arguments: %v", args)
-	}
+func (o *ApiVersionsOptions) Complete(f cmdutil.Factory) error {
 	var err error
 	o.discoveryClient, err = f.ToDiscoveryClient()
 	if err != nil {
@@ -79,14 +72,13 @@ func (o *APIVersionsOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, arg
 	return nil
 }
 
-// RunAPIVersions does the work
-func (o *APIVersionsOptions) RunAPIVersions() error {
+func (o *ApiVersionsOptions) RunApiVersions() error {
 	// Always request fresh data from the server
 	o.discoveryClient.Invalidate()
 
 	groupList, err := o.discoveryClient.ServerGroups()
 	if err != nil {
-		return fmt.Errorf("couldn't get available api versions from server: %v", err)
+		return fmt.Errorf("Couldn't get available api versions from server: %v\n", err)
 	}
 	apiVersions := metav1.ExtractGroupVersions(groupList)
 	sort.Strings(apiVersions)

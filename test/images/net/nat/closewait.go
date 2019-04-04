@@ -40,7 +40,7 @@ import (
 // connection assigned here.
 var leakedConnection *net.TCPConn
 
-// CloseWaitServerOptions holds server JSON options.
+// Server JSON options.
 type CloseWaitServerOptions struct {
 	// Address to bind for the test
 	LocalAddr string
@@ -110,7 +110,7 @@ func (server *closeWaitServer) Run(logger *log.Logger, rawOptions interface{}) e
 	return nil
 }
 
-// CloseWaitClientOptions holds client JSON options.
+// Client JSON options
 type CloseWaitClientOptions struct {
 	// RemoteAddr of the server to connect to.
 	RemoteAddr string

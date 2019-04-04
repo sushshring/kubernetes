@@ -23,7 +23,7 @@ import (
 	info "github.com/google/cadvisor/info/v1"
 	"github.com/google/cadvisor/manager/watcher"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 const RktNamespace = "rkt"
@@ -78,7 +78,7 @@ func Register(machineInfoFactory info.MachineInfoFactory, fsInfo fs.FsInfo, incl
 		return fmt.Errorf("unable to get the RktPath variable %v", err)
 	}
 
-	cgroupSubsystems, err := libcontainer.GetCgroupSubsystems(includedMetrics)
+	cgroupSubsystems, err := libcontainer.GetCgroupSubsystems()
 	if err != nil {
 		return fmt.Errorf("failed to get cgroup subsystems: %v", err)
 	}
@@ -86,7 +86,7 @@ func Register(machineInfoFactory info.MachineInfoFactory, fsInfo fs.FsInfo, incl
 		return fmt.Errorf("failed to find supported cgroup mounts for the raw factory")
 	}
 
-	klog.V(1).Infof("Registering Rkt factory")
+	glog.V(1).Infof("Registering Rkt factory")
 	factory := &rktFactory{
 		machineInfoFactory: machineInfoFactory,
 		fsInfo:             fsInfo,

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -427,7 +428,7 @@ func writeFile(filename string, data []byte) error {
 func changeFileName(dir, from, to string, t *testing.T) {
 	fromPath := filepath.Join(dir, from)
 	toPath := filepath.Join(dir, to)
-	if err := os.Rename(fromPath, toPath); err != nil {
+	if err := exec.Command("mv", fromPath, toPath).Run(); err != nil {
 		t.Errorf("Fail to change file name: %s", err)
 	}
 }

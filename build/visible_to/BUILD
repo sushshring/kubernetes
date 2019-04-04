@@ -193,7 +193,6 @@ package_group(
         "//pkg/kubectl/cmd/expose",
         "//pkg/kubectl/cmd/get",
         "//pkg/kubectl/cmd/help",
-        "//pkg/kubectl/cmd/kustomize",
         "//pkg/kubectl/cmd/label",
         "//pkg/kubectl/cmd/logs",
         "//pkg/kubectl/cmd/options",
@@ -392,9 +391,10 @@ package_group(
     name = "pkg_kubectl_util_CONSUMERS",
     packages = [
         "//pkg/kubectl",
-        "//pkg/kubectl/cmd/...",
-        "//pkg/kubectl/generate",
-        "//pkg/kubectl/generate/versioned",
+        "//pkg/kubectl/cmd",
+        "//pkg/kubectl/cmd/logs",
+        "//pkg/kubectl/cmd/portforward",
+        "//pkg/kubectl/cmd/rollingupdate",
         "//pkg/kubectl/proxy",
     ],
 )

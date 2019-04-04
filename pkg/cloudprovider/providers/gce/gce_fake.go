@@ -20,12 +20,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud"
 	compute "google.golang.org/api/compute/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/gce/cloud"
 )
 
-// TestClusterValues holds the config values for the fake/test gce cloud object.
 type TestClusterValues struct {
 	ProjectID         string
 	Region            string
@@ -35,8 +34,6 @@ type TestClusterValues struct {
 	ClusterName       string
 }
 
-// DefaultTestClusterValues Creates a reasonable set of default cluster values
-// for generating a new test fake GCE cloud instance.
 func DefaultTestClusterValues() TestClusterValues {
 	return TestClusterValues{
 		ProjectID:         "test-project",
@@ -46,6 +43,10 @@ func DefaultTestClusterValues() TestClusterValues {
 		ClusterID:         "test-cluster-id",
 		ClusterName:       "Test Cluster Name",
 	}
+}
+
+func FakeGCECloud(vals TestClusterValues) *GCECloud {
+	return simpleFakeGCECloud(vals)
 }
 
 type fakeRoundTripper struct{}
@@ -65,11 +66,10 @@ func fakeClusterID(clusterID string) ClusterID {
 	}
 }
 
-// NewFakeGCECloud constructs a fake GCE Cloud from the cluster values.
-func NewFakeGCECloud(vals TestClusterValues) *Cloud {
+func simpleFakeGCECloud(vals TestClusterValues) *GCECloud {
 	client := &http.Client{Transport: &fakeRoundTripper{}}
 	service, _ := compute.New(client)
-	gce := &Cloud{
+	gce := &GCECloud{
 		region:           vals.Region,
 		service:          service,
 		managedZones:     []string{vals.ZoneName},

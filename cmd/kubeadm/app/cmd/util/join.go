@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The Kubernetes Authors.
+Copyright 2018 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ package util
 import (
 	"bytes"
 	"crypto/x509"
+	"fmt"
 	"html/template"
 	"strings"
 
-	"github.com/pkg/errors"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcertutil "k8s.io/client-go/util/cert"
 	kubeconfigutil "k8s.io/kubernetes/cmd/kubeadm/app/util/kubeconfig"
@@ -30,34 +30,22 @@ import (
 )
 
 var joinCommandTemplate = template.Must(template.New("join").Parse(`` +
-	`kubeadm join {{.ControlPlaneHostPort}} --token {{.Token}} \
-    {{range $h := .CAPubKeyPins}}--discovery-token-ca-cert-hash {{$h}} {{end}}{{if .ControlPlane}}\
-    --experimental-control-plane {{if .CertificateKey}}--certificate-key {{.CertificateKey}}{{end}}{{end}}`,
+	`kubeadm join {{.MasterHostPort}} --token {{.Token}}{{range $h := .CAPubKeyPins}} --discovery-token-ca-cert-hash {{$h}}{{end}}`,
 ))
 
-// GetJoinWorkerCommand returns the kubeadm join command for a given token and
-// and Kubernetes cluster (the current cluster in the kubeconfig file)
-func GetJoinWorkerCommand(kubeConfigFile, token string, skipTokenPrint bool) (string, error) {
-	return getJoinCommand(kubeConfigFile, token, "", false, skipTokenPrint, false)
-}
-
-// GetJoinControlPlaneCommand returns the kubeadm join command for a given token and
-// and Kubernetes cluster (the current cluster in the kubeconfig file)
-func GetJoinControlPlaneCommand(kubeConfigFile, token, key string, skipTokenPrint, skipCertificateKeyPrint bool) (string, error) {
-	return getJoinCommand(kubeConfigFile, token, key, true, skipTokenPrint, skipCertificateKeyPrint)
-}
-
-func getJoinCommand(kubeConfigFile, token, key string, controlPlane, skipTokenPrint, skipCertificateKeyPrint bool) (string, error) {
+// GetJoinCommand returns the kubeadm join command for a given token and
+// and kubernetes cluster (the current cluster in the kubeconfig file)
+func GetJoinCommand(kubeConfigFile string, token string, skipTokenPrint bool) (string, error) {
 	// load the kubeconfig file to get the CA certificate and endpoint
 	config, err := clientcmd.LoadFromFile(kubeConfigFile)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to load kubeconfig")
+		return "", fmt.Errorf("failed to load kubeconfig: %v", err)
 	}
 
 	// load the default cluster config
 	clusterConfig := kubeconfigutil.GetClusterFromKubeConfig(config)
 	if clusterConfig == nil {
-		return "", errors.New("failed to get default cluster config")
+		return "", fmt.Errorf("failed to get default cluster config")
 	}
 
 	// load CA certificates from the kubeconfig (either from PEM data or by file path)
@@ -65,15 +53,15 @@ func getJoinCommand(kubeConfigFile, token, key string, controlPlane, skipTokenPr
 	if clusterConfig.CertificateAuthorityData != nil {
 		caCerts, err = clientcertutil.ParseCertsPEM(clusterConfig.CertificateAuthorityData)
 		if err != nil {
-			return "", errors.Wrap(err, "failed to parse CA certificate from kubeconfig")
+			return "", fmt.Errorf("failed to parse CA certificate from kubeconfig: %v", err)
 		}
 	} else if clusterConfig.CertificateAuthority != "" {
 		caCerts, err = clientcertutil.CertsFromFile(clusterConfig.CertificateAuthority)
 		if err != nil {
-			return "", errors.Wrap(err, "failed to load CA certificate referenced by kubeconfig")
+			return "", fmt.Errorf("failed to load CA certificate referenced by kubeconfig: %v", err)
 		}
 	} else {
-		return "", errors.New("no CA certificates found in kubeconfig")
+		return "", fmt.Errorf("no CA certificates found in kubeconfig")
 	}
 
 	// hash all the CA certs and include their public key pins as trusted values
@@ -83,24 +71,19 @@ func getJoinCommand(kubeConfigFile, token, key string, controlPlane, skipTokenPr
 	}
 
 	ctx := map[string]interface{}{
-		"Token":                token,
-		"CAPubKeyPins":         publicKeyPins,
-		"ControlPlaneHostPort": strings.Replace(clusterConfig.Server, "https://", "", -1),
-		"CertificateKey":       key,
-		"ControlPlane":         controlPlane,
+		"Token":          token,
+		"CAPubKeyPins":   publicKeyPins,
+		"MasterHostPort": strings.Replace(clusterConfig.Server, "https://", "", -1),
 	}
 
 	if skipTokenPrint {
 		ctx["Token"] = template.HTML("<value withheld>")
 	}
-	if skipCertificateKeyPrint {
-		ctx["CertificateKey"] = template.HTML("<value withheld>")
-	}
 
 	var out bytes.Buffer
 	err = joinCommandTemplate.Execute(&out, ctx)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to render join command template")
+		return "", fmt.Errorf("failed to render join command template: %v", err)
 	}
 	return out.String(), nil
 }

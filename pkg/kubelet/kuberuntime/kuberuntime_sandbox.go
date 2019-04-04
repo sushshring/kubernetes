@@ -22,12 +22,12 @@ import (
 	"net/url"
 	"sort"
 
+	"github.com/golang/glog"
 	"k8s.io/api/core/v1"
 	kubetypes "k8s.io/apimachinery/pkg/types"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
-	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/features"
+	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/kubernetes/pkg/kubelet/util/format"
@@ -38,7 +38,7 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(pod *v1.Pod, attempt uint32
 	podSandboxConfig, err := m.generatePodSandboxConfig(pod, attempt)
 	if err != nil {
 		message := fmt.Sprintf("GeneratePodSandboxConfig for pod %q failed: %v", format.Pod(pod), err)
-		klog.Error(message)
+		glog.Error(message)
 		return "", message, err
 	}
 
@@ -46,7 +46,7 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(pod *v1.Pod, attempt uint32
 	err = m.osInterface.MkdirAll(podSandboxConfig.LogDirectory, 0755)
 	if err != nil {
 		message := fmt.Sprintf("Create pod log directory for pod %q failed: %v", format.Pod(pod), err)
-		klog.Errorf(message)
+		glog.Errorf(message)
 		return "", message, err
 	}
 
@@ -57,15 +57,12 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(pod *v1.Pod, attempt uint32
 			message := fmt.Sprintf("CreatePodSandbox for pod %q failed: %v", format.Pod(pod), err)
 			return "", message, err
 		}
-		if runtimeHandler != "" {
-			klog.V(2).Infof("Running pod %s with RuntimeHandler %q", format.Pod(pod), runtimeHandler)
-		}
 	}
 
 	podSandBoxID, err := m.runtimeService.RunPodSandbox(podSandboxConfig, runtimeHandler)
 	if err != nil {
 		message := fmt.Sprintf("CreatePodSandbox for pod %q failed: %v", format.Pod(pod), err)
-		klog.Error(message)
+		glog.Error(message)
 		return "", message, err
 	}
 
@@ -103,7 +100,7 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 		podSandboxConfig.Hostname = hostname
 	}
 
-	logDir := BuildPodLogsDirectory(pod.Namespace, pod.Name, pod.UID)
+	logDir := buildPodLogsDirectory(pod.UID)
 	podSandboxConfig.LogDirectory = logDir
 
 	portMappings := []*runtimeapi.PortMapping{}
@@ -207,7 +204,7 @@ func (m *kubeGenericRuntimeManager) getKubeletSandboxes(all bool) ([]*runtimeapi
 
 	resp, err := m.runtimeService.ListPodSandbox(filter)
 	if err != nil {
-		klog.Errorf("ListPodSandbox failed: %v", err)
+		glog.Errorf("ListPodSandbox failed: %v", err)
 		return nil, err
 	}
 
@@ -217,14 +214,14 @@ func (m *kubeGenericRuntimeManager) getKubeletSandboxes(all bool) ([]*runtimeapi
 // determinePodSandboxIP determines the IP address of the given pod sandbox.
 func (m *kubeGenericRuntimeManager) determinePodSandboxIP(podNamespace, podName string, podSandbox *runtimeapi.PodSandboxStatus) string {
 	if podSandbox.Network == nil {
-		klog.Warningf("Pod Sandbox status doesn't have network information, cannot report IP")
+		glog.Warningf("Pod Sandbox status doesn't have network information, cannot report IP")
 		return ""
 	}
 	ip := podSandbox.Network.Ip
 	if len(ip) != 0 && net.ParseIP(ip) == nil {
 		// ip could be an empty string if runtime is not responsible for the
 		// IP (e.g., host networking).
-		klog.Warningf("Pod Sandbox reported an unparseable IP %v", ip)
+		glog.Warningf("Pod Sandbox reported an unparseable IP %v", ip)
 		return ""
 	}
 	return ip
@@ -243,7 +240,7 @@ func (m *kubeGenericRuntimeManager) getSandboxIDByPodUID(podUID kubetypes.UID, s
 	}
 	sandboxes, err := m.runtimeService.ListPodSandbox(filter)
 	if err != nil {
-		klog.Errorf("ListPodSandbox with pod UID %q failed: %v", podUID, err)
+		glog.Errorf("ListPodSandbox with pod UID %q failed: %v", podUID, err)
 		return nil, err
 	}
 

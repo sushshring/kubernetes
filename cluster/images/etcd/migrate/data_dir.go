@@ -25,12 +25,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 // DataDirectory provides utilities for initializing and backing up an
 // etcd "data-dir" as well as managing a version.txt file to track the
-// etcd server version and storage version of the etcd data in the
+// etcd server version and storage verion of the etcd data in the
 // directory.
 type DataDirectory struct {
 	path        string
@@ -45,7 +45,7 @@ func OpenOrCreateDataDirectory(path string) (*DataDirectory, error) {
 		return nil, err
 	}
 	if !exists {
-		klog.Infof("data directory '%s' does not exist, creating it", path)
+		glog.Infof("data directory '%s' does not exist, creating it", path)
 		err := os.MkdirAll(path, 0777)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create data directory %s: %v", path, err)
@@ -67,7 +67,7 @@ func (d *DataDirectory) Initialize(target *EtcdVersionPair) error {
 		return err
 	}
 	if isEmpty {
-		klog.Infof("data directory '%s' is empty, writing target version '%s' to version.txt", d.path, target)
+		glog.Infof("data directory '%s' is empty, writing target version '%s' to version.txt", d.path, target)
 		err = d.versionFile.Write(target)
 		if err != nil {
 			return fmt.Errorf("failed to write version.txt to '%s': %v", d.path, err)
@@ -122,7 +122,7 @@ type VersionFile struct {
 	path string
 }
 
-// Exists returns true if a version.txt file exists on the file system.
+// Exists returns true if a version.txt file exists on the filesystem.
 func (v *VersionFile) Exists() (bool, error) {
 	return exists(v.path)
 }

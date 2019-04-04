@@ -24,13 +24,12 @@ import (
 
 	"github.com/spf13/pflag"
 
+	apimachineryconfig "k8s.io/apimachinery/pkg/apis/config"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/diff"
+	apiserverconfig "k8s.io/apiserver/pkg/apis/config"
 	apiserveroptions "k8s.io/apiserver/pkg/server/options"
-	componentbaseconfig "k8s.io/component-base/config"
 	cmoptions "k8s.io/kubernetes/cmd/controller-manager/app/options"
-	kubectrlmgrconfig "k8s.io/kubernetes/pkg/controller/apis/config"
-	serviceconfig "k8s.io/kubernetes/pkg/controller/service/config"
 )
 
 func TestDefaultFlags(t *testing.T) {
@@ -38,58 +37,48 @@ func TestDefaultFlags(t *testing.T) {
 
 	expected := &CloudControllerManagerOptions{
 		Generic: &cmoptions.GenericControllerManagerConfigurationOptions{
-			GenericControllerManagerConfiguration: &kubectrlmgrconfig.GenericControllerManagerConfiguration{
-				Port:            DefaultInsecureCloudControllerManagerPort, // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
-				Address:         "0.0.0.0",                                 // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
-				MinResyncPeriod: metav1.Duration{Duration: 12 * time.Hour},
-				ClientConnection: componentbaseconfig.ClientConnectionConfiguration{
-					ContentType: "application/vnd.kubernetes.protobuf",
-					QPS:         20.0,
-					Burst:       30,
-				},
-				ControllerStartInterval: metav1.Duration{Duration: 0},
-				LeaderElection: componentbaseconfig.LeaderElectionConfiguration{
-					ResourceLock:  "endpoints",
-					LeaderElect:   true,
-					LeaseDuration: metav1.Duration{Duration: 15 * time.Second},
-					RenewDeadline: metav1.Duration{Duration: 10 * time.Second},
-					RetryPeriod:   metav1.Duration{Duration: 2 * time.Second},
-				},
-				Controllers: []string{"*"},
+			Port:            DefaultInsecureCloudControllerManagerPort, // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
+			Address:         "0.0.0.0",                                 // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
+			MinResyncPeriod: metav1.Duration{Duration: 12 * time.Hour},
+			ClientConnection: apimachineryconfig.ClientConnectionConfiguration{
+				ContentType: "application/vnd.kubernetes.protobuf",
+				QPS:         20.0,
+				Burst:       30,
+			},
+			ControllerStartInterval: metav1.Duration{Duration: 0},
+			LeaderElection: apiserverconfig.LeaderElectionConfiguration{
+				ResourceLock:  "endpoints",
+				LeaderElect:   true,
+				LeaseDuration: metav1.Duration{Duration: 15 * time.Second},
+				RenewDeadline: metav1.Duration{Duration: 10 * time.Second},
+				RetryPeriod:   metav1.Duration{Duration: 2 * time.Second},
 			},
 			Debugging: &cmoptions.DebuggingOptions{
-				DebuggingConfiguration: &componentbaseconfig.DebuggingConfiguration{
-					EnableContentionProfiling: false,
-				},
+				EnableContentionProfiling: false,
 			},
+			Controllers: []string{"*"},
 		},
 		KubeCloudShared: &cmoptions.KubeCloudSharedOptions{
-			KubeCloudSharedConfiguration: &kubectrlmgrconfig.KubeCloudSharedConfiguration{
-				RouteReconciliationPeriod: metav1.Duration{Duration: 10 * time.Second},
-				NodeMonitorPeriod:         metav1.Duration{Duration: 5 * time.Second},
-				ClusterName:               "kubernetes",
-				ClusterCIDR:               "",
-				AllocateNodeCIDRs:         false,
-				CIDRAllocatorType:         "",
-				ConfigureCloudRoutes:      true,
-			},
+			RouteReconciliationPeriod: metav1.Duration{Duration: 10 * time.Second},
+			NodeMonitorPeriod:         metav1.Duration{Duration: 5 * time.Second},
+			ClusterName:               "kubernetes",
+			ClusterCIDR:               "",
+			AllocateNodeCIDRs:         false,
+			CIDRAllocatorType:         "",
+			ConfigureCloudRoutes:      true,
 			CloudProvider: &cmoptions.CloudProviderOptions{
-				CloudProviderConfiguration: &kubectrlmgrconfig.CloudProviderConfiguration{
-					Name:            "",
-					CloudConfigFile: "",
-				},
+				Name:            "",
+				CloudConfigFile: "",
 			},
 		},
 		ServiceController: &cmoptions.ServiceControllerOptions{
-			ServiceControllerConfiguration: &serviceconfig.ServiceControllerConfiguration{
-				ConcurrentServiceSyncs: 1,
-			},
+			ConcurrentServiceSyncs: 1,
 		},
 		SecureServing: (&apiserveroptions.SecureServingOptions{
 			BindPort:    10258,
 			BindAddress: net.ParseIP("0.0.0.0"),
 			ServerCert: apiserveroptions.GeneratableKeyCert{
-				CertDirectory: "",
+				CertDirectory: "/var/run/kubernetes",
 				PairName:      "cloud-controller-manager",
 			},
 			HTTP2MaxStreamsPerConnection: 0,
@@ -127,7 +116,7 @@ func TestDefaultFlags(t *testing.T) {
 func TestAddFlags(t *testing.T) {
 	fs := pflag.NewFlagSet("addflagstest", pflag.ContinueOnError)
 	s, _ := NewCloudControllerManagerOptions()
-	for _, f := range s.Flags([]string{""}, []string{""}).FlagSets {
+	for _, f := range s.Flags().FlagSets {
 		fs.AddFlagSet(f)
 	}
 
@@ -143,7 +132,6 @@ func TestAddFlags(t *testing.T) {
 		"--configure-cloud-routes=false",
 		"--contention-profiling=true",
 		"--controller-start-interval=2m",
-		"--controllers=foo,bar",
 		"--http2-max-streams-per-connection=47",
 		"--kube-api-burst=100",
 		"--kube-api-content-type=application/vnd.kubernetes.protobuf",
@@ -167,52 +155,42 @@ func TestAddFlags(t *testing.T) {
 
 	expected := &CloudControllerManagerOptions{
 		Generic: &cmoptions.GenericControllerManagerConfigurationOptions{
-			GenericControllerManagerConfiguration: &kubectrlmgrconfig.GenericControllerManagerConfiguration{
-				Port:            DefaultInsecureCloudControllerManagerPort, // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
-				Address:         "0.0.0.0",                                 // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
-				MinResyncPeriod: metav1.Duration{Duration: 100 * time.Minute},
-				ClientConnection: componentbaseconfig.ClientConnectionConfiguration{
-					ContentType: "application/vnd.kubernetes.protobuf",
-					QPS:         50.0,
-					Burst:       100,
-				},
-				ControllerStartInterval: metav1.Duration{Duration: 2 * time.Minute},
-				LeaderElection: componentbaseconfig.LeaderElectionConfiguration{
-					ResourceLock:  "configmap",
-					LeaderElect:   false,
-					LeaseDuration: metav1.Duration{Duration: 30 * time.Second},
-					RenewDeadline: metav1.Duration{Duration: 15 * time.Second},
-					RetryPeriod:   metav1.Duration{Duration: 5 * time.Second},
-				},
-				Controllers: []string{"foo", "bar"},
+			Port:            DefaultInsecureCloudControllerManagerPort, // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
+			Address:         "0.0.0.0",                                 // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
+			MinResyncPeriod: metav1.Duration{Duration: 100 * time.Minute},
+			ClientConnection: apimachineryconfig.ClientConnectionConfiguration{
+				ContentType: "application/vnd.kubernetes.protobuf",
+				QPS:         50.0,
+				Burst:       100,
+			},
+			ControllerStartInterval: metav1.Duration{Duration: 2 * time.Minute},
+			LeaderElection: apiserverconfig.LeaderElectionConfiguration{
+				ResourceLock:  "configmap",
+				LeaderElect:   false,
+				LeaseDuration: metav1.Duration{Duration: 30 * time.Second},
+				RenewDeadline: metav1.Duration{Duration: 15 * time.Second},
+				RetryPeriod:   metav1.Duration{Duration: 5 * time.Second},
 			},
 			Debugging: &cmoptions.DebuggingOptions{
-				DebuggingConfiguration: &componentbaseconfig.DebuggingConfiguration{
-					EnableContentionProfiling: true,
-				},
+				EnableContentionProfiling: true,
 			},
+			Controllers: []string{"*"},
 		},
 		KubeCloudShared: &cmoptions.KubeCloudSharedOptions{
-			KubeCloudSharedConfiguration: &kubectrlmgrconfig.KubeCloudSharedConfiguration{
-				RouteReconciliationPeriod: metav1.Duration{Duration: 30 * time.Second},
-				NodeMonitorPeriod:         metav1.Duration{Duration: 5 * time.Second},
-				ClusterName:               "k8s",
-				ClusterCIDR:               "1.2.3.4/24",
-				AllocateNodeCIDRs:         true,
-				CIDRAllocatorType:         "RangeAllocator",
-				ConfigureCloudRoutes:      false,
-			},
 			CloudProvider: &cmoptions.CloudProviderOptions{
-				CloudProviderConfiguration: &kubectrlmgrconfig.CloudProviderConfiguration{
-					Name:            "gce",
-					CloudConfigFile: "/cloud-config",
-				},
+				Name:            "gce",
+				CloudConfigFile: "/cloud-config",
 			},
+			RouteReconciliationPeriod: metav1.Duration{Duration: 30 * time.Second},
+			NodeMonitorPeriod:         metav1.Duration{Duration: 5 * time.Second},
+			ClusterName:               "k8s",
+			ClusterCIDR:               "1.2.3.4/24",
+			AllocateNodeCIDRs:         true,
+			CIDRAllocatorType:         "RangeAllocator",
+			ConfigureCloudRoutes:      false,
 		},
 		ServiceController: &cmoptions.ServiceControllerOptions{
-			ServiceControllerConfiguration: &serviceconfig.ServiceControllerConfiguration{
-				ConcurrentServiceSyncs: 1,
-			},
+			ConcurrentServiceSyncs: 1,
 		},
 		SecureServing: (&apiserveroptions.SecureServingOptions{
 			BindPort:    10001,

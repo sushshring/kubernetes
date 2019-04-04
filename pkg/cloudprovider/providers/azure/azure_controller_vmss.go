@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
-	"k8s.io/klog"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-04-01/compute"
+	"github.com/golang/glog"
 
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -67,36 +67,32 @@ func (ss *scaleSet) AttachDisk(isManagedDisk bool, diskName, diskURI string, nod
 				CreateOption: "attach",
 			})
 	}
-	newVM := compute.VirtualMachineScaleSetVM{
-		Sku:      vm.Sku,
-		Location: vm.Location,
-		VirtualMachineScaleSetVMProperties: &compute.VirtualMachineScaleSetVMProperties{
-			HardwareProfile: vm.HardwareProfile,
-			StorageProfile: &compute.StorageProfile{
-				OsDisk:    vm.StorageProfile.OsDisk,
-				DataDisks: &disks,
-			},
-		},
-	}
+	vm.StorageProfile.DataDisks = &disks
 
 	ctx, cancel := getContextWithCancel()
 	defer cancel()
-
-	// Invalidate the cache right after updating
-	key := buildVmssCacheKey(nodeResourceGroup, ss.makeVmssVMName(ssName, instanceID))
-	defer ss.vmssVMCache.Delete(key)
-
-	klog.V(2).Infof("azureDisk - update(%s): vm(%s) - attach disk(%s, %s)", nodeResourceGroup, nodeName, diskName, diskURI)
-	_, err = ss.VirtualMachineScaleSetVMsClient.Update(ctx, nodeResourceGroup, ssName, instanceID, newVM)
+	glog.V(2).Infof("azureDisk - update(%s): vm(%s) - attach disk", nodeResourceGroup, nodeName)
+	resp, err := ss.VirtualMachineScaleSetVMsClient.Update(ctx, nodeResourceGroup, ssName, instanceID, vm)
+	if ss.CloudProviderBackoff && shouldRetryHTTPRequest(resp, err) {
+		glog.V(2).Infof("azureDisk - update(%s) backing off: vm(%s)", nodeResourceGroup, nodeName)
+		retryErr := ss.UpdateVmssVMWithRetry(ctx, nodeResourceGroup, ssName, instanceID, vm)
+		if retryErr != nil {
+			err = retryErr
+			glog.V(2).Infof("azureDisk - update(%s) abort backoff: vm(%s)", nodeResourceGroup, nodeName)
+		}
+	}
 	if err != nil {
 		detail := err.Error()
 		if strings.Contains(detail, errLeaseFailed) || strings.Contains(detail, errDiskBlobNotFound) {
 			// if lease cannot be acquired or disk not found, immediately detach the disk and return the original error
-			klog.Infof("azureDisk - err %s, try detach disk(%s, %s)", detail, diskName, diskURI)
+			glog.Infof("azureDisk - err %s, try detach", detail)
 			ss.DetachDiskByName(diskName, diskURI, nodeName)
 		}
 	} else {
-		klog.V(2).Infof("azureDisk - attach disk(%s, %s) succeeded", diskName, diskURI)
+		glog.V(4).Info("azureDisk - azure attach succeeded")
+		// Invalidate the cache right after updating
+		key := buildVmssCacheKey(nodeResourceGroup, ss.makeVmssVMName(ssName, instanceID))
+		ss.vmssVMCache.Delete(key)
 	}
 	return err
 }
@@ -125,7 +121,7 @@ func (ss *scaleSet) DetachDiskByName(diskName, diskURI string, nodeName types.No
 			(disk.Vhd != nil && disk.Vhd.URI != nil && diskURI != "" && *disk.Vhd.URI == diskURI) ||
 			(disk.ManagedDisk != nil && diskURI != "" && *disk.ManagedDisk.ID == diskURI) {
 			// found the disk
-			klog.V(2).Infof("azureDisk - detach disk: name %q uri %q", diskName, diskURI)
+			glog.V(4).Infof("azureDisk - detach disk: name %q uri %q", diskName, diskURI)
 			disks = append(disks[:i], disks[i+1:]...)
 			bFoundDisk = true
 			break
@@ -136,39 +132,26 @@ func (ss *scaleSet) DetachDiskByName(diskName, diskURI string, nodeName types.No
 		return fmt.Errorf("detach azure disk failure, disk %s not found, diskURI: %s", diskName, diskURI)
 	}
 
-	newVM := compute.VirtualMachineScaleSetVM{
-		Sku:      vm.Sku,
-		Location: vm.Location,
-		VirtualMachineScaleSetVMProperties: &compute.VirtualMachineScaleSetVMProperties{
-			HardwareProfile: vm.HardwareProfile,
-			StorageProfile: &compute.StorageProfile{
-				OsDisk:    vm.StorageProfile.OsDisk,
-				DataDisks: &disks,
-			},
-		},
-	}
-
+	vm.StorageProfile.DataDisks = &disks
 	ctx, cancel := getContextWithCancel()
 	defer cancel()
-
-	// Invalidate the cache right after updating
-	key := buildVmssCacheKey(nodeResourceGroup, ss.makeVmssVMName(ssName, instanceID))
-	defer ss.vmssVMCache.Delete(key)
-
-	klog.V(2).Infof("azureDisk - update(%s): vm(%s) - detach disk(%s, %s)", nodeResourceGroup, nodeName, diskName, diskURI)
-	resp, err := ss.VirtualMachineScaleSetVMsClient.Update(ctx, nodeResourceGroup, ssName, instanceID, newVM)
+	glog.V(2).Infof("azureDisk - update(%s): vm(%s) - detach disk", nodeResourceGroup, nodeName)
+	resp, err := ss.VirtualMachineScaleSetVMsClient.Update(ctx, nodeResourceGroup, ssName, instanceID, vm)
 	if ss.CloudProviderBackoff && shouldRetryHTTPRequest(resp, err) {
-		klog.V(2).Infof("azureDisk - update(%s) backing off: vm(%s) detach disk(%s, %s), err: %v", nodeResourceGroup, nodeName, diskName, diskURI, err)
-		retryErr := ss.UpdateVmssVMWithRetry(nodeResourceGroup, ssName, instanceID, newVM)
+		glog.V(2).Infof("azureDisk - update(%s) backing off: vm(%s)", nodeResourceGroup, nodeName)
+		retryErr := ss.UpdateVmssVMWithRetry(ctx, nodeResourceGroup, ssName, instanceID, vm)
 		if retryErr != nil {
 			err = retryErr
-			klog.V(2).Infof("azureDisk - update(%s) abort backoff: vm(%s) detach disk(%s, %s), err: %v", nodeResourceGroup, nodeName, diskName, diskURI, err)
+			glog.V(2).Infof("azureDisk - update(%s) abort backoff: vm(%s)", nodeResourceGroup, nodeName)
 		}
 	}
 	if err != nil {
-		klog.Errorf("azureDisk - detach disk(%s, %s) from %s failed, err: %v", diskName, diskURI, nodeName, err)
+		glog.Errorf("azureDisk - azure disk detach %q from %s failed, err: %v", diskName, nodeName, err)
 	} else {
-		klog.V(2).Infof("azureDisk - detach disk(%s, %s) succeeded", diskName, diskURI)
+		glog.V(4).Info("azureDisk - azure detach succeeded")
+		// Invalidate the cache right after updating
+		key := buildVmssCacheKey(nodeResourceGroup, ss.makeVmssVMName(ssName, instanceID))
+		ss.vmssVMCache.Delete(key)
 	}
 
 	return err

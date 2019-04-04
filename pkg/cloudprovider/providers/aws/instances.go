@@ -19,41 +19,40 @@ package aws
 import (
 	"fmt"
 	"net/url"
-	"regexp"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"k8s.io/klog"
-
+	"github.com/golang/glog"
 	"k8s.io/api/core/v1"
+	"regexp"
+	"sync"
+	"time"
 )
 
 // awsInstanceRegMatch represents Regex Match for AWS instance.
 var awsInstanceRegMatch = regexp.MustCompile("^i-[^/]*$")
 
-// InstanceID represents the ID of the instance in the AWS API, e.g. i-12345678
+// awsInstanceID represents the ID of the instance in the AWS API, e.g. i-12345678
 // The "traditional" format is "i-12345678"
 // A new longer format is also being introduced: "i-12345678abcdef01"
 // We should not assume anything about the length or format, though it seems
 // reasonable to assume that instances will continue to start with "i-".
-type InstanceID string
+type awsInstanceID string
 
-func (i InstanceID) awsString() *string {
+func (i awsInstanceID) awsString() *string {
 	return aws.String(string(i))
 }
 
-// KubernetesInstanceID represents the id for an instance in the kubernetes API;
+// kubernetesInstanceID represents the id for an instance in the kubernetes API;
 // the following form
 //  * aws:///<zone>/<awsInstanceId>
 //  * aws:////<awsInstanceId>
 //  * <awsInstanceId>
-type KubernetesInstanceID string
+type kubernetesInstanceID string
 
-// MapToAWSInstanceID extracts the InstanceID from the KubernetesInstanceID
-func (name KubernetesInstanceID) MapToAWSInstanceID() (InstanceID, error) {
+// mapToAWSInstanceID extracts the awsInstanceID from the kubernetesInstanceID
+func (name kubernetesInstanceID) mapToAWSInstanceID() (awsInstanceID, error) {
 	s := string(name)
 
 	if !strings.HasPrefix(s, "aws://") {
@@ -85,17 +84,17 @@ func (name KubernetesInstanceID) MapToAWSInstanceID() (InstanceID, error) {
 		return "", fmt.Errorf("Invalid format for AWS instance (%s)", name)
 	}
 
-	return InstanceID(awsID), nil
+	return awsInstanceID(awsID), nil
 }
 
-// mapToAWSInstanceID extracts the InstanceIDs from the Nodes, returning an error if a Node cannot be mapped
-func mapToAWSInstanceIDs(nodes []*v1.Node) ([]InstanceID, error) {
-	var instanceIDs []InstanceID
+// mapToAWSInstanceID extracts the awsInstanceIDs from the Nodes, returning an error if a Node cannot be mapped
+func mapToAWSInstanceIDs(nodes []*v1.Node) ([]awsInstanceID, error) {
+	var instanceIDs []awsInstanceID
 	for _, node := range nodes {
 		if node.Spec.ProviderID == "" {
 			return nil, fmt.Errorf("node %q did not have ProviderID set", node.Name)
 		}
-		instanceID, err := KubernetesInstanceID(node.Spec.ProviderID).MapToAWSInstanceID()
+		instanceID, err := kubernetesInstanceID(node.Spec.ProviderID).mapToAWSInstanceID()
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse ProviderID %q for node %q", node.Spec.ProviderID, node.Name)
 		}
@@ -105,17 +104,17 @@ func mapToAWSInstanceIDs(nodes []*v1.Node) ([]InstanceID, error) {
 	return instanceIDs, nil
 }
 
-// mapToAWSInstanceIDsTolerant extracts the InstanceIDs from the Nodes, skipping Nodes that cannot be mapped
-func mapToAWSInstanceIDsTolerant(nodes []*v1.Node) []InstanceID {
-	var instanceIDs []InstanceID
+// mapToAWSInstanceIDsTolerant extracts the awsInstanceIDs from the Nodes, skipping Nodes that cannot be mapped
+func mapToAWSInstanceIDsTolerant(nodes []*v1.Node) []awsInstanceID {
+	var instanceIDs []awsInstanceID
 	for _, node := range nodes {
 		if node.Spec.ProviderID == "" {
-			klog.Warningf("node %q did not have ProviderID set", node.Name)
+			glog.Warningf("node %q did not have ProviderID set", node.Name)
 			continue
 		}
-		instanceID, err := KubernetesInstanceID(node.Spec.ProviderID).MapToAWSInstanceID()
+		instanceID, err := kubernetesInstanceID(node.Spec.ProviderID).mapToAWSInstanceID()
 		if err != nil {
-			klog.Warningf("unable to parse ProviderID %q for node %q", node.Spec.ProviderID, node.Name)
+			glog.Warningf("unable to parse ProviderID %q for node %q", node.Spec.ProviderID, node.Name)
 			continue
 		}
 		instanceIDs = append(instanceIDs, instanceID)
@@ -125,7 +124,7 @@ func mapToAWSInstanceIDsTolerant(nodes []*v1.Node) []InstanceID {
 }
 
 // Gets the full information about this instance from the EC2 API
-func describeInstance(ec2Client EC2, instanceID InstanceID) (*ec2.Instance, error) {
+func describeInstance(ec2Client EC2, instanceID awsInstanceID) (*ec2.Instance, error) {
 	request := &ec2.DescribeInstancesInput{
 		InstanceIds: []*string{instanceID.awsString()},
 	}
@@ -156,7 +155,7 @@ type instanceCache struct {
 func (c *instanceCache) describeAllInstancesUncached() (*allInstancesSnapshot, error) {
 	now := time.Now()
 
-	klog.V(4).Infof("EC2 DescribeInstances - fetching all instances")
+	glog.V(4).Infof("EC2 DescribeInstances - fetching all instances")
 
 	filters := []*ec2.Filter{}
 	instances, err := c.cloud.describeInstances(filters)
@@ -164,9 +163,9 @@ func (c *instanceCache) describeAllInstancesUncached() (*allInstancesSnapshot, e
 		return nil, err
 	}
 
-	m := make(map[InstanceID]*ec2.Instance)
+	m := make(map[awsInstanceID]*ec2.Instance)
 	for _, i := range instances {
-		id := InstanceID(aws.StringValue(i.InstanceId))
+		id := awsInstanceID(aws.StringValue(i.InstanceId))
 		m[id] = i
 	}
 
@@ -177,7 +176,7 @@ func (c *instanceCache) describeAllInstancesUncached() (*allInstancesSnapshot, e
 
 	if c.snapshot != nil && snapshot.olderThan(c.snapshot) {
 		// If this happens a lot, we could run this function in a mutex and only return one result
-		klog.Infof("Not caching concurrent AWS DescribeInstances results")
+		glog.Infof("Not caching concurrent AWS DescribeInstances results")
 	} else {
 		c.snapshot = snapshot
 	}
@@ -191,9 +190,9 @@ type cacheCriteria struct {
 	// If set to 0 (i.e. unset), cached values will not time out because of age.
 	MaxAge time.Duration
 
-	// HasInstances is a list of InstanceIDs that must be in a cached snapshot for it to be considered valid.
+	// HasInstances is a list of awsInstanceIDs that must be in a cached snapshot for it to be considered valid.
 	// If an instance is not found in the cached snapshot, the snapshot be ignored and we will re-fetch.
-	HasInstances []InstanceID
+	HasInstances []awsInstanceID
 }
 
 // describeAllInstancesCached returns all instances, using cached results if applicable
@@ -210,7 +209,7 @@ func (c *instanceCache) describeAllInstancesCached(criteria cacheCriteria) (*all
 			return nil, err
 		}
 	} else {
-		klog.V(6).Infof("EC2 DescribeInstances - using cached results")
+		glog.V(6).Infof("EC2 DescribeInstances - using cached results")
 	}
 
 	return snapshot, nil
@@ -236,7 +235,7 @@ func (s *allInstancesSnapshot) MeetsCriteria(criteria cacheCriteria) bool {
 		// Sub() is technically broken by time changes until we have monotonic time
 		now := time.Now()
 		if now.Sub(s.timestamp) > criteria.MaxAge {
-			klog.V(6).Infof("instanceCache snapshot cannot be used as is older than MaxAge=%s", criteria.MaxAge)
+			glog.V(6).Infof("instanceCache snapshot cannot be used as is older than MaxAge=%s", criteria.MaxAge)
 			return false
 		}
 	}
@@ -244,7 +243,7 @@ func (s *allInstancesSnapshot) MeetsCriteria(criteria cacheCriteria) bool {
 	if len(criteria.HasInstances) != 0 {
 		for _, id := range criteria.HasInstances {
 			if nil == s.instances[id] {
-				klog.V(6).Infof("instanceCache snapshot cannot be used as does not contain instance %s", id)
+				glog.V(6).Infof("instanceCache snapshot cannot be used as does not contain instance %s", id)
 				return false
 			}
 		}
@@ -257,12 +256,12 @@ func (s *allInstancesSnapshot) MeetsCriteria(criteria cacheCriteria) bool {
 // along with the timestamp for cache-invalidation purposes
 type allInstancesSnapshot struct {
 	timestamp time.Time
-	instances map[InstanceID]*ec2.Instance
+	instances map[awsInstanceID]*ec2.Instance
 }
 
 // FindInstances returns the instances corresponding to the specified ids.  If an id is not found, it is ignored.
-func (s *allInstancesSnapshot) FindInstances(ids []InstanceID) map[InstanceID]*ec2.Instance {
-	m := make(map[InstanceID]*ec2.Instance)
+func (s *allInstancesSnapshot) FindInstances(ids []awsInstanceID) map[awsInstanceID]*ec2.Instance {
+	m := make(map[awsInstanceID]*ec2.Instance)
 	for _, id := range ids {
 		instance := s.instances[id]
 		if instance != nil {

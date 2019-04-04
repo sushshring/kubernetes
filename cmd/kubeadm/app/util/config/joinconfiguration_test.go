@@ -29,44 +29,57 @@ import (
 )
 
 const (
-	nodeV1beta1YAML    = "testdata/conversion/node/v1beta1.yaml"
-	nodeInternalYAML   = "testdata/conversion/node/internal.yaml"
-	nodeIncompleteYAML = "testdata/defaulting/node/incomplete.yaml"
-	nodeDefaultedYAML  = "testdata/defaulting/node/defaulted.yaml"
-	nodeInvalidYAML    = "testdata/validation/invalid_nodecfg.yaml"
+	node_v1alpha3YAML   = "testdata/conversion/node/v1alpha3.yaml"
+	node_v1beta1YAML    = "testdata/conversion/node/v1beta1.yaml"
+	node_internalYAML   = "testdata/conversion/node/internal.yaml"
+	node_incompleteYAML = "testdata/defaulting/node/incomplete.yaml"
+	node_defaultedYAML  = "testdata/defaulting/node/defaulted.yaml"
+	node_invalidYAML    = "testdata/validation/invalid_nodecfg.yaml"
 )
 
-func TestLoadJoinConfigurationFromFile(t *testing.T) {
+func TestJoinConfigFileAndDefaultsToInternalConfig(t *testing.T) {
 	var tests = []struct {
 		name, in, out string
 		groupVersion  schema.GroupVersion
 		expectedErr   bool
 	}{
-		// These tests are reading one file, loading it using LoadJoinConfigurationFromFile that all of kubeadm is using for unmarshal of our API types,
+		// These tests are reading one file, loading it using JoinConfigFileAndDefaultsToInternalConfig that all of kubeadm is using for unmarshal of our API types,
 		// and then marshals the internal object to the expected groupVersion
+		{ // v1alpha3 -> internal
+			name:         "v1alpha3ToInternal",
+			in:           node_v1alpha3YAML,
+			out:          node_internalYAML,
+			groupVersion: kubeadm.SchemeGroupVersion,
+		},
 		{ // v1beta1 -> internal
 			name:         "v1beta1ToInternal",
-			in:           nodeV1beta1YAML,
-			out:          nodeInternalYAML,
+			in:           node_v1beta1YAML,
+			out:          node_internalYAML,
 			groupVersion: kubeadm.SchemeGroupVersion,
+		},
+		{ // v1alpha3 -> internal -> v1beta1
+			name:         "v1alpha3Tov1beta1",
+			in:           node_v1alpha3YAML,
+			out:          node_v1beta1YAML,
+			groupVersion: kubeadmapiv1beta1.SchemeGroupVersion,
 		},
 		{ // v1beta1 -> internal -> v1beta1
 			name:         "v1beta1Tov1beta1",
-			in:           nodeV1beta1YAML,
-			out:          nodeV1beta1YAML,
+			in:           node_v1beta1YAML,
+			out:          node_v1beta1YAML,
 			groupVersion: kubeadmapiv1beta1.SchemeGroupVersion,
 		},
-		// These tests are reading one file that has only a subset of the fields populated, loading it using LoadJoinConfigurationFromFile,
+		// These tests are reading one file that has only a subset of the fields populated, loading it using JoinConfigFileAndDefaultsToInternalConfig,
 		// and then marshals the internal object to the expected groupVersion
 		{ // v1beta1 -> default -> validate -> internal -> v1beta1
 			name:         "incompleteYAMLToDefaultedv1beta1",
-			in:           nodeIncompleteYAML,
-			out:          nodeDefaultedYAML,
+			in:           node_incompleteYAML,
+			out:          node_defaultedYAML,
 			groupVersion: kubeadmapiv1beta1.SchemeGroupVersion,
 		},
-		{ // v1beta1 -> validation should fail
+		{ // v1alpha3 -> validation should fail
 			name:        "invalidYAMLShouldFail",
-			in:          nodeInvalidYAML,
+			in:          node_invalidYAML,
 			expectedErr: true,
 		},
 	}
@@ -74,7 +87,7 @@ func TestLoadJoinConfigurationFromFile(t *testing.T) {
 	for _, rt := range tests {
 		t.Run(rt.name, func(t2 *testing.T) {
 
-			internalcfg, err := LoadJoinConfigurationFromFile(rt.in)
+			internalcfg, err := JoinConfigFileAndDefaultsToInternalConfig(rt.in, &kubeadmapiv1beta1.JoinConfiguration{})
 			if err != nil {
 				if rt.expectedErr {
 					return

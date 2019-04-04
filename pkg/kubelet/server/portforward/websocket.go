@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -43,15 +43,15 @@ const (
 	v4Base64WebsocketProtocol = "v4." + wsstream.Base64ChannelWebSocketProtocol
 )
 
-// V4Options contains details about which streams are required for port
-// forwarding.
+// options contains details about which streams are required for
+// port forwarding.
 // All fields included in V4Options need to be expressed explicitly in the
-// CRI (k8s.io/cri-api/pkg/apis/{version}/api.proto) PortForwardRequest.
+// CRI (pkg/kubelet/apis/cri/{version}/api.proto) PortForwardRequest.
 type V4Options struct {
 	Ports []int32
 }
 
-// NewV4Options creates a new options from the Request.
+// newOptions creates a new options from the Request.
 func NewV4Options(req *http.Request) (*V4Options, error) {
 	if !wsstream.IsWebSocketRequest(req) {
 		return &V4Options{}, nil
@@ -185,9 +185,9 @@ func (h *websocketStreamHandler) portForward(p *websocketStreamPair) {
 	defer p.dataStream.Close()
 	defer p.errorStream.Close()
 
-	klog.V(5).Infof("(conn=%p) invoking forwarder.PortForward for port %d", h.conn, p.port)
+	glog.V(5).Infof("(conn=%p) invoking forwarder.PortForward for port %d", h.conn, p.port)
 	err := h.forwarder.PortForward(h.pod, h.uid, p.port, p.dataStream)
-	klog.V(5).Infof("(conn=%p) done invoking forwarder.PortForward for port %d", h.conn, p.port)
+	glog.V(5).Infof("(conn=%p) done invoking forwarder.PortForward for port %d", h.conn, p.port)
 
 	if err != nil {
 		msg := fmt.Errorf("error forwarding port %d to pod %s, uid %v: %v", p.port, h.pod, h.uid, err)

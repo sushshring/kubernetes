@@ -145,21 +145,19 @@ func TestExpandVolumeMountsWithSubpath(t *testing.T) {
 		envs              []EnvVar
 		expectedSubPath   string
 		expectedMountPath string
-		expectedOk        bool
 	}{
 		{
 			name: "subpath with no expansion",
 			container: &v1.Container{
-				VolumeMounts: []v1.VolumeMount{{SubPathExpr: "foo"}},
+				VolumeMounts: []v1.VolumeMount{{SubPath: "foo"}},
 			},
 			expectedSubPath:   "foo",
 			expectedMountPath: "",
-			expectedOk:        true,
 		},
 		{
 			name: "volumes with expanded subpath",
 			container: &v1.Container{
-				VolumeMounts: []v1.VolumeMount{{SubPathExpr: "foo/$(POD_NAME)"}},
+				VolumeMounts: []v1.VolumeMount{{SubPath: "foo/$(POD_NAME)"}},
 			},
 			envs: []EnvVar{
 				{
@@ -169,12 +167,11 @@ func TestExpandVolumeMountsWithSubpath(t *testing.T) {
 			},
 			expectedSubPath:   "foo/bar",
 			expectedMountPath: "",
-			expectedOk:        true,
 		},
 		{
 			name: "volumes expanded with empty subpath",
 			container: &v1.Container{
-				VolumeMounts: []v1.VolumeMount{{SubPathExpr: ""}},
+				VolumeMounts: []v1.VolumeMount{{SubPath: ""}},
 			},
 			envs: []EnvVar{
 				{
@@ -184,21 +181,19 @@ func TestExpandVolumeMountsWithSubpath(t *testing.T) {
 			},
 			expectedSubPath:   "",
 			expectedMountPath: "",
-			expectedOk:        true,
 		},
 		{
 			name: "volumes expanded with no envs subpath",
 			container: &v1.Container{
-				VolumeMounts: []v1.VolumeMount{{SubPathExpr: "/foo/$(POD_NAME)"}},
+				VolumeMounts: []v1.VolumeMount{{SubPath: "/foo/$(POD_NAME)"}},
 			},
 			expectedSubPath:   "/foo/$(POD_NAME)",
 			expectedMountPath: "",
-			expectedOk:        false,
 		},
 		{
 			name: "volumes expanded with leading environment variable",
 			container: &v1.Container{
-				VolumeMounts: []v1.VolumeMount{{SubPathExpr: "$(POD_NAME)/bar"}},
+				VolumeMounts: []v1.VolumeMount{{SubPath: "$(POD_NAME)/bar"}},
 			},
 			envs: []EnvVar{
 				{
@@ -208,12 +203,11 @@ func TestExpandVolumeMountsWithSubpath(t *testing.T) {
 			},
 			expectedSubPath:   "foo/bar",
 			expectedMountPath: "",
-			expectedOk:        true,
 		},
 		{
 			name: "volumes with volume and subpath",
 			container: &v1.Container{
-				VolumeMounts: []v1.VolumeMount{{MountPath: "/foo", SubPathExpr: "$(POD_NAME)/bar"}},
+				VolumeMounts: []v1.VolumeMount{{MountPath: "/foo", SubPath: "$(POD_NAME)/bar"}},
 			},
 			envs: []EnvVar{
 				{
@@ -223,7 +217,6 @@ func TestExpandVolumeMountsWithSubpath(t *testing.T) {
 			},
 			expectedSubPath:   "foo/bar",
 			expectedMountPath: "/foo",
-			expectedOk:        true,
 		},
 		{
 			name: "volumes with volume and no subpath",
@@ -238,78 +231,11 @@ func TestExpandVolumeMountsWithSubpath(t *testing.T) {
 			},
 			expectedSubPath:   "",
 			expectedMountPath: "/foo",
-			expectedOk:        true,
-		},
-		{
-			name: "subpaths with empty environment variable",
-			container: &v1.Container{
-				VolumeMounts: []v1.VolumeMount{{SubPathExpr: "foo/$(POD_NAME)/$(ANNOTATION)"}},
-			},
-			envs: []EnvVar{
-				{
-					Name:  "ANNOTATION",
-					Value: "",
-				},
-			},
-			expectedSubPath:   "foo/$(POD_NAME)/$(ANNOTATION)",
-			expectedMountPath: "",
-			expectedOk:        false,
-		},
-		{
-			name: "subpaths with missing env variables",
-			container: &v1.Container{
-				VolumeMounts: []v1.VolumeMount{{SubPathExpr: "foo/$(ODD_NAME)/$(POD_NAME)"}},
-			},
-			envs: []EnvVar{
-				{
-					Name:  "ODD_NAME",
-					Value: "bar",
-				},
-			},
-			expectedSubPath:   "foo/$(ODD_NAME)/$(POD_NAME)",
-			expectedMountPath: "",
-			expectedOk:        false,
-		},
-		{
-			name: "subpaths with empty expansion",
-			container: &v1.Container{
-				VolumeMounts: []v1.VolumeMount{{SubPathExpr: "$()"}},
-			},
-			expectedSubPath:   "$()",
-			expectedMountPath: "",
-			expectedOk:        false,
-		},
-		{
-			name: "subpaths with nested expandable envs",
-			container: &v1.Container{
-				VolumeMounts: []v1.VolumeMount{{SubPathExpr: "$(POD_NAME$(ANNOTATION))"}},
-			},
-			envs: []EnvVar{
-				{
-					Name:  "POD_NAME",
-					Value: "foo",
-				},
-				{
-					Name:  "ANNOTATION",
-					Value: "bar",
-				},
-			},
-			expectedSubPath:   "$(POD_NAME$(ANNOTATION))",
-			expectedMountPath: "",
-			expectedOk:        false,
 		},
 	}
 
 	for _, tc := range cases {
-		actualSubPath, err := ExpandContainerVolumeMounts(tc.container.VolumeMounts[0], tc.envs)
-		ok := err == nil
-		if e, a := tc.expectedOk, ok; !reflect.DeepEqual(e, a) {
-			t.Errorf("%v: unexpected validation failure of subpath; expected %v, got %v", tc.name, e, a)
-		}
-		if !ok {
-			// if ExpandContainerVolumeMounts returns an error, we don't care what the actualSubPath value is
-			continue
-		}
+		actualSubPath := ExpandContainerVolumeMounts(tc.container.VolumeMounts[0], tc.envs)
 		if e, a := tc.expectedSubPath, actualSubPath; !reflect.DeepEqual(e, a) {
 			t.Errorf("%v: unexpected subpath; expected %v, got %v", tc.name, e, a)
 		}

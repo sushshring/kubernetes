@@ -21,11 +21,9 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	libstrings "strings"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2017-10-01/storage"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -33,14 +31,14 @@ import (
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure"
 	"k8s.io/kubernetes/pkg/util/mount"
+	"k8s.io/kubernetes/pkg/util/strings"
 	"k8s.io/kubernetes/pkg/volume"
-	utilstrings "k8s.io/utils/strings"
 )
 
 const (
-	defaultStorageAccountType       = compute.StandardLRS
+	defaultStorageAccountType       = storage.StandardLRS
 	defaultAzureDiskKind            = v1.AzureManagedDisk
-	defaultAzureDataDiskCachingMode = v1.AzureDataDiskCachingReadOnly
+	defaultAzureDataDiskCachingMode = v1.AzureDataDiskCachingNone
 )
 
 type dataDisk struct {
@@ -61,12 +59,10 @@ var (
 		string(api.AzureSharedBlobDisk),
 		string(api.AzureDedicatedBlobDisk),
 		string(api.AzureManagedDisk))
-
-	lunPathRE = regexp.MustCompile(`/dev/disk/azure/scsi(?:.*)/lun(.+)`)
 )
 
 func getPath(uid types.UID, volName string, host volume.VolumeHost) string {
-	return host.GetPodVolumeDir(uid, utilstrings.EscapeQualifiedName(azureDataDiskPluginName), volName)
+	return host.GetPodVolumeDir(uid, strings.EscapeQualifiedNameForDisk(azureDataDiskPluginName), volName)
 }
 
 // creates a unique path for disks (even if they share the same *.vhd name)
@@ -124,13 +120,13 @@ func normalizeKind(kind string) (v1.AzureDataDiskKind, error) {
 	return v1.AzureDataDiskKind(kind), nil
 }
 
-func normalizeStorageAccountType(storageAccountType string) (compute.DiskStorageAccountTypes, error) {
+func normalizeStorageAccountType(storageAccountType string) (storage.SkuName, error) {
 	if storageAccountType == "" {
 		return defaultStorageAccountType, nil
 	}
 
-	sku := compute.DiskStorageAccountTypes(storageAccountType)
-	supportedSkuNames := compute.PossibleDiskStorageAccountTypesValues()
+	sku := storage.SkuName(storageAccountType)
+	supportedSkuNames := storage.PossibleSkuNameValues()
 	for _, s := range supportedSkuNames {
 		if sku == s {
 			return sku, nil
@@ -204,26 +200,4 @@ func strFirstLetterToUpper(str string) string {
 		return str
 	}
 	return libstrings.ToUpper(string(str[0])) + str[1:]
-}
-
-// getDiskLUN : deviceInfo could be a LUN number or a device path, e.g. /dev/disk/azure/scsi1/lun2
-func getDiskLUN(deviceInfo string) (int32, error) {
-	var diskLUN string
-	if len(deviceInfo) <= 2 {
-		diskLUN = deviceInfo
-	} else {
-		// extract the LUN num from a device path
-		matches := lunPathRE.FindStringSubmatch(deviceInfo)
-		if len(matches) == 2 {
-			diskLUN = matches[1]
-		} else {
-			return -1, fmt.Errorf("cannot parse deviceInfo: %s", deviceInfo)
-		}
-	}
-
-	lun, err := strconv.Atoi(diskLUN)
-	if err != nil {
-		return -1, err
-	}
-	return int32(lun), nil
 }

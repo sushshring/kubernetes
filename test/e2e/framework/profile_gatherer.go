@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	// DefaultCPUProfileSeconds is default value for how long the CPU profile is gathered for.
+	// Default value for how long the CPU profile is gathered for.
 	DefaultCPUProfileSeconds = 30
 )
 
@@ -168,12 +168,10 @@ func gatherProfile(componentName, profileBaseName, profileKind string) error {
 // that the function finishes. There's also a polling-based gatherer utility for
 // CPU profiles available below.
 
-// GatherCPUProfile gathers CPU profile.
 func GatherCPUProfile(componentName string, profileBaseName string, wg *sync.WaitGroup) {
 	GatherCPUProfileForSeconds(componentName, profileBaseName, DefaultCPUProfileSeconds, wg)
 }
 
-// GatherCPUProfileForSeconds gathers CPU profile for specified seconds.
 func GatherCPUProfileForSeconds(componentName string, profileBaseName string, seconds int, wg *sync.WaitGroup) {
 	if wg != nil {
 		defer wg.Done()
@@ -183,7 +181,6 @@ func GatherCPUProfileForSeconds(componentName string, profileBaseName string, se
 	}
 }
 
-// GatherMemoryProfile gathers memory profile.
 func GatherMemoryProfile(componentName string, profileBaseName string, wg *sync.WaitGroup) {
 	if wg != nil {
 		defer wg.Done()

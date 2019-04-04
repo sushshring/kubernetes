@@ -19,12 +19,14 @@ package options
 import (
 	"github.com/spf13/pflag"
 
-	persistentvolumeconfig "k8s.io/kubernetes/pkg/controller/volume/persistentvolume/config"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubectrlmgrconfig "k8s.io/kubernetes/pkg/controller/apis/config"
 )
 
 // PersistentVolumeBinderControllerOptions holds the PersistentVolumeBinderController options.
 type PersistentVolumeBinderControllerOptions struct {
-	*persistentvolumeconfig.PersistentVolumeBinderControllerConfiguration
+	PVClaimBinderSyncPeriod metav1.Duration
+	VolumeConfiguration     kubectrlmgrconfig.VolumeConfiguration
 }
 
 // AddFlags adds flags related to PersistentVolumeBinderController for controller manager to the specified FlagSet.
@@ -46,7 +48,7 @@ func (o *PersistentVolumeBinderControllerOptions) AddFlags(fs *pflag.FlagSet) {
 }
 
 // ApplyTo fills up PersistentVolumeBinderController config with options.
-func (o *PersistentVolumeBinderControllerOptions) ApplyTo(cfg *persistentvolumeconfig.PersistentVolumeBinderControllerConfiguration) error {
+func (o *PersistentVolumeBinderControllerOptions) ApplyTo(cfg *kubectrlmgrconfig.PersistentVolumeBinderControllerConfiguration) error {
 	if o == nil {
 		return nil
 	}

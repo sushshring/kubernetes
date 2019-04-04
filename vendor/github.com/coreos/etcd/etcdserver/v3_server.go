@@ -634,7 +634,6 @@ func (s *EtcdServer) linearizableReadLoop() {
 				return
 			}
 			plog.Errorf("failed to get read index from raft: %v", err)
-			readIndexFailed.Inc()
 			nr.notify(err)
 			continue
 		}
@@ -660,7 +659,7 @@ func (s *EtcdServer) linearizableReadLoop() {
 				}
 
 			case <-time.After(s.Cfg.ReqTimeout()):
-				plog.Warningf("timed out waiting for read index response (local node might have slow network)")
+				plog.Warningf("timed out waiting for read index response")
 				nr.notify(ErrTimeout)
 				timeout = true
 				slowReadIndex.Inc()

@@ -22,7 +22,7 @@ import (
 	"os"
 	"sync"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 // Factory is a function that returns a cloudprovider.Interface.
@@ -59,9 +59,9 @@ func RegisterCloudProvider(name string, cloud Factory) {
 	providersMutex.Lock()
 	defer providersMutex.Unlock()
 	if _, found := providers[name]; found {
-		klog.Fatalf("Cloud provider %q was registered twice", name)
+		glog.Fatalf("Cloud provider %q was registered twice", name)
 	}
-	klog.V(1).Infof("Registered cloud provider %q", name)
+	glog.V(1).Infof("Registered cloud provider %q", name)
 	providers[name] = cloud
 }
 
@@ -100,12 +100,12 @@ func InitCloudProvider(name string, configFilePath string) (Interface, error) {
 	var err error
 
 	if name == "" {
-		klog.Info("No cloud provider specified.")
+		glog.Info("No cloud provider specified.")
 		return nil, nil
 	}
 
 	if IsExternal(name) {
-		klog.Info("External cloud provider specified")
+		glog.Info("External cloud provider specified")
 		return nil, nil
 	}
 
@@ -115,7 +115,7 @@ func InitCloudProvider(name string, configFilePath string) (Interface, error) {
 			if provider.external {
 				detail = fmt.Sprintf("Please use 'external' cloud provider for %s: %s", name, provider.detail)
 			}
-			klog.Warningf("WARNING: %s built-in cloud provider is now deprecated. %s", name, detail)
+			glog.Warningf("WARNING: %s built-in cloud provider is now deprecated. %s", name, detail)
 
 			break
 		}
@@ -125,7 +125,7 @@ func InitCloudProvider(name string, configFilePath string) (Interface, error) {
 		var config *os.File
 		config, err = os.Open(configFilePath)
 		if err != nil {
-			klog.Fatalf("Couldn't open cloud provider configuration %s: %#v",
+			glog.Fatalf("Couldn't open cloud provider configuration %s: %#v",
 				configFilePath, err)
 		}
 

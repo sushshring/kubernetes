@@ -16,10 +16,7 @@ limitations under the License.
 
 package naming
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestGetNameFromCallsite(t *testing.T) {
 	tests := []struct {
@@ -29,17 +26,17 @@ func TestGetNameFromCallsite(t *testing.T) {
 	}{
 		{
 			name:     "simple",
-			expected: "k8s.io/apimachinery/pkg/util/naming/from_stack_test.go:",
+			expected: "k8s.io/apimachinery/pkg/util/naming/from_stack_test.go:50",
 		},
 		{
 			name:            "ignore-package",
 			ignoredPackages: []string{"k8s.io/apimachinery/pkg/util/naming"},
-			expected:        "testing/testing.go:",
+			expected:        "testing/testing.go:827",
 		},
 		{
 			name:            "ignore-file",
 			ignoredPackages: []string{"k8s.io/apimachinery/pkg/util/naming/from_stack_test.go"},
-			expected:        "testing/testing.go:",
+			expected:        "testing/testing.go:827",
 		},
 		{
 			name:            "ignore-multiple",
@@ -51,8 +48,8 @@ func TestGetNameFromCallsite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := GetNameFromCallsite(tc.ignoredPackages...)
-			if !strings.HasPrefix(actual, tc.expected) {
-				t.Fatalf("expected string with prefix %q, got %q", tc.expected, actual)
+			if tc.expected != actual {
+				t.Fatalf("expected %q, got %q", tc.expected, actual)
 			}
 		})
 	}

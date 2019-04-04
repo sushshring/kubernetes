@@ -53,7 +53,6 @@ type APIServiceSpec struct {
 	// This is strongly discouraged.  You should use the CABundle instead.
 	InsecureSkipTLSVerify bool `json:"insecureSkipTLSVerify,omitempty" protobuf:"varint,4,opt,name=insecureSkipTLSVerify"`
 	// CABundle is a PEM encoded CA bundle which will be used to validate an API server's serving certificate.
-	// If unspecified, system trust roots on the apiserver are used.
 	// +optional
 	CABundle []byte `json:"caBundle,omitempty" protobuf:"bytes,5,opt,name=caBundle"`
 
@@ -81,7 +80,6 @@ type APIServiceSpec struct {
 	// Priority int64 `json:"priority" protobuf:"varint,6,opt,name=priority"`
 }
 
-// ConditionStatus indicates the status of a condition (true, false, or unknown).
 type ConditionStatus string
 
 // These are valid condition statuses. "ConditionTrue" means a resource is in the condition;
@@ -94,7 +92,7 @@ const (
 	ConditionUnknown ConditionStatus = "Unknown"
 )
 
-// APIServiceConditionType is a valid value for APIServiceCondition.Type
+// APIConditionConditionType is a valid value for APIServiceCondition.Type
 type APIServiceConditionType string
 
 const (
@@ -102,7 +100,6 @@ const (
 	Available APIServiceConditionType = "Available"
 )
 
-// APIServiceCondition describes the state of an APIService at a particular point
 type APIServiceCondition struct {
 	// Type is the type of the condition.
 	Type APIServiceConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=APIServiceConditionType"`

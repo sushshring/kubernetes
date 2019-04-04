@@ -1,8 +1,8 @@
-apiVersion: apps/v1
+apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
   labels:
-    foo: boo
+    foo: boo 
   name: scale-3
 spec:
   replicas: 1

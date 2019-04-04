@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"k8s.io/api/core/v1"
-	v1meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apimachineryconfig "k8s.io/apimachinery/pkg/apis/config"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
@@ -39,21 +39,19 @@ import (
 	"k8s.io/apiserver/pkg/server/mux"
 	"k8s.io/apiserver/pkg/server/routes"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	"k8s.io/client-go/informers"
+	"k8s.io/apiserver/pkg/util/flag"
+	informers "k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/record"
-	cliflag "k8s.io/component-base/cli/flag"
-	componentbaseconfig "k8s.io/component-base/config"
 	"k8s.io/kube-proxy/config/v1alpha1"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/kubelet/qos"
 	"k8s.io/kubernetes/pkg/master/ports"
 	"k8s.io/kubernetes/pkg/proxy"
-	"k8s.io/kubernetes/pkg/proxy/apis"
 	kubeproxyconfig "k8s.io/kubernetes/pkg/proxy/apis/config"
 	"k8s.io/kubernetes/pkg/proxy/apis/config/scheme"
 	"k8s.io/kubernetes/pkg/proxy/apis/config/validation"
@@ -63,7 +61,6 @@ import (
 	"k8s.io/kubernetes/pkg/proxy/ipvs"
 	"k8s.io/kubernetes/pkg/proxy/userspace"
 	"k8s.io/kubernetes/pkg/util/configz"
-	"k8s.io/kubernetes/pkg/util/filesystem"
 	utilflag "k8s.io/kubernetes/pkg/util/flag"
 	utilipset "k8s.io/kubernetes/pkg/util/ipset"
 	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
@@ -75,11 +72,10 @@ import (
 	"k8s.io/utils/exec"
 	utilpointer "k8s.io/utils/pointer"
 
-	"github.com/fsnotify/fsnotify"
+	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"k8s.io/klog"
 )
 
 const (
@@ -88,11 +84,6 @@ const (
 	proxyModeIPVS        = "ipvs"
 	proxyModeKernelspace = "kernelspace"
 )
-
-// proxyRun defines the interface to run a specified ProxyServer
-type proxyRun interface {
-	Run() error
-}
 
 // Options contains everything necessary to create and run a proxy server.
 type Options struct {
@@ -109,12 +100,6 @@ type Options struct {
 	WindowsService bool
 	// config is the proxy server's configuration object.
 	config *kubeproxyconfig.KubeProxyConfiguration
-	// watcher is used to watch on the update change of ConfigFile
-	watcher filesystem.FSWatcher
-	// proxyServer is the interface to run the proxy server
-	proxyServer proxyRun
-	// errCh is the channel that errors will be sent
-	errCh chan error
 
 	// The fields below here are placeholders for flags that can't be directly mapped into
 	// config.KubeProxyConfiguration.
@@ -125,14 +110,9 @@ type Options struct {
 	master string
 	// healthzPort is the port to be used by the healthz server.
 	healthzPort int32
-	// metricsPort is the port to be used by the metrics server.
-	metricsPort int32
 
 	scheme *runtime.Scheme
 	codecs serializer.CodecFactory
-
-	// hostnameOverride, if set from the command line flag, takes precedence over the `HostnameOverride` value from the config file
-	hostnameOverride string
 }
 
 // AddFlags adds flags to fs and binds them to options.
@@ -150,15 +130,14 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.Var(utilflag.IPVar{Val: &o.config.BindAddress}, "bind-address", "The IP address for the proxy server to serve on (set to `0.0.0.0` for all IPv4 interfaces and `::` for all IPv6 interfaces)")
 	fs.StringVar(&o.master, "master", o.master, "The address of the Kubernetes API server (overrides any value in kubeconfig)")
 	fs.Int32Var(&o.healthzPort, "healthz-port", o.healthzPort, "The port to bind the health check server. Use 0 to disable.")
-	fs.Var(utilflag.IPVar{Val: &o.config.HealthzBindAddress}, "healthz-bind-address", "The IP address for the health check server to serve on (set to `0.0.0.0` for all IPv4 interfaces and `::` for all IPv6 interfaces)")
-	fs.Int32Var(&o.metricsPort, "metrics-port", o.metricsPort, "The port to bind the metrics server. Use 0 to disable.")
-	fs.Var(utilflag.IPVar{Val: &o.config.MetricsBindAddress}, "metrics-bind-address", "The IP address for the metrics server to serve on (set to `0.0.0.0` for all IPv4 interfaces and `::` for all IPv6 interfaces)")
+	fs.Var(utilflag.IPVar{Val: &o.config.HealthzBindAddress}, "healthz-bind-address", "The IP address and port for the health check server to serve on (set to `0.0.0.0` for all IPv4 interfaces and `::` for all IPv6 interfaces)")
+	fs.Var(utilflag.IPVar{Val: &o.config.MetricsBindAddress}, "metrics-bind-address", "The IP address and port for the metrics server to serve on (set to `0.0.0.0` for all IPv4 interfaces and `::` for all IPv6 interfaces)")
 	fs.Int32Var(o.config.OOMScoreAdj, "oom-score-adj", utilpointer.Int32PtrDerefOr(o.config.OOMScoreAdj, int32(qos.KubeProxyOOMScoreAdj)), "The oom-score-adj value for kube-proxy process. Values must be within the range [-1000, 1000]")
 	fs.StringVar(&o.config.ResourceContainer, "resource-container", o.config.ResourceContainer, "Absolute name of the resource-only container to create and run the Kube-proxy in (Default: /kube-proxy).")
 	fs.MarkDeprecated("resource-container", "This feature will be removed in a later release.")
 	fs.StringVar(&o.config.ClientConnection.Kubeconfig, "kubeconfig", o.config.ClientConnection.Kubeconfig, "Path to kubeconfig file with authorization information (the master location is set by the master flag).")
 	fs.Var(utilflag.PortRangeVar{Val: &o.config.PortRange}, "proxy-port-range", "Range of host ports (beginPort-endPort, single port or beginPort+offset, inclusive) that may be consumed in order to proxy service traffic. If (unspecified, 0, or 0-0) then ports will be randomly chosen.")
-	fs.StringVar(&o.hostnameOverride, "hostname-override", o.hostnameOverride, "If non-empty, will use this string as identification instead of the actual hostname.")
+	fs.StringVar(&o.config.HostnameOverride, "hostname-override", o.config.HostnameOverride, "If non-empty, will use this string as identification instead of the actual hostname.")
 	fs.Var(&o.config.Mode, "proxy-mode", "Which proxy mode to use: 'userspace' (older) or 'iptables' (faster) or 'ipvs' (experimental). If blank, use the best-available proxy (currently iptables).  If the iptables proxy is selected, regardless of how, but the system's kernel or iptables versions are insufficient, this always falls back to the userspace proxy.")
 	fs.Int32Var(o.config.IPTables.MasqueradeBit, "iptables-masquerade-bit", utilpointer.Int32PtrDerefOr(o.config.IPTables.MasqueradeBit, 14), "If using the pure iptables proxy, the bit of the fwmark space to mark packets requiring SNAT with.  Must be within the range [0, 31].")
 	fs.DurationVar(&o.config.IPTables.SyncPeriod.Duration, "iptables-sync-period", o.config.IPTables.SyncPeriod.Duration, "The maximum interval of how often iptables rules are refreshed (e.g. '5s', '1m', '2h22m').  Must be greater than 0.")
@@ -166,7 +145,6 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.DurationVar(&o.config.IPVS.SyncPeriod.Duration, "ipvs-sync-period", o.config.IPVS.SyncPeriod.Duration, "The maximum interval of how often ipvs rules are refreshed (e.g. '5s', '1m', '2h22m').  Must be greater than 0.")
 	fs.DurationVar(&o.config.IPVS.MinSyncPeriod.Duration, "ipvs-min-sync-period", o.config.IPVS.MinSyncPeriod.Duration, "The minimum interval of how often the ipvs rules can be refreshed as endpoints and services change (e.g. '5s', '1m', '2h22m').")
 	fs.StringSliceVar(&o.config.IPVS.ExcludeCIDRs, "ipvs-exclude-cidrs", o.config.IPVS.ExcludeCIDRs, "A comma-separated list of CIDR's which the ipvs proxier should not touch when cleaning up IPVS rules.")
-	fs.BoolVar(&o.config.IPVS.StrictARP, "ipvs-strict-arp", o.config.IPVS.StrictARP, "Enable strict ARP by setting arp_ignore to 1 and arp_announce to 2")
 	fs.DurationVar(&o.config.ConfigSyncPeriod.Duration, "config-sync-period", o.config.ConfigSyncPeriod.Duration, "How often configuration from the apiserver is refreshed.  Must be greater than 0.")
 	fs.BoolVar(&o.config.IPTables.MasqueradeAll, "masquerade-all", o.config.IPTables.MasqueradeAll, "If using the pure iptables proxy, SNAT all traffic sent via Service cluster IPs (this not commonly needed)")
 	fs.StringVar(&o.config.ClusterCIDR, "cluster-cidr", o.config.ClusterCIDR, "The CIDR range of pods in the cluster. When configured, traffic sent to a Service cluster IP from outside this range will be masqueraded and traffic sent from pods to an external LoadBalancer IP will be directed to the respective cluster IP instead")
@@ -193,7 +171,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.config.IPVS.Scheduler, "ipvs-scheduler", o.config.IPVS.Scheduler, "The ipvs scheduler type when proxy mode is ipvs")
 	fs.StringSliceVar(&o.config.NodePortAddresses, "nodeport-addresses", o.config.NodePortAddresses,
 		"A string slice of values which specify the addresses to use for NodePorts. Values may be valid IP blocks (e.g. 1.2.3.0/24, 1.2.3.4/32). The default empty string slice ([]) means to use all local addresses.")
-	fs.Var(cliflag.NewMapStringBool(&o.config.FeatureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features. "+
+	fs.Var(flag.NewMapStringBool(&o.config.FeatureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features. "+
 		"Options are:\n"+strings.Join(utilfeature.DefaultFeatureGate.KnownFeatures(), "\n"))
 }
 
@@ -201,20 +179,17 @@ func NewOptions() *Options {
 	return &Options{
 		config:      new(kubeproxyconfig.KubeProxyConfiguration),
 		healthzPort: ports.ProxyHealthzPort,
-		metricsPort: ports.ProxyStatusPort,
 		scheme:      scheme.Scheme,
 		codecs:      scheme.Codecs,
 		CleanupIPVS: true,
-		errCh:       make(chan error),
 	}
 }
 
 // Complete completes all the required options.
 func (o *Options) Complete() error {
 	if len(o.ConfigFile) == 0 && len(o.WriteConfigTo) == 0 {
-		klog.Warning("WARNING: all flags other than --config, --write-config-to, and --cleanup are deprecated. Please begin using a config file ASAP.")
+		glog.Warning("WARNING: all flags other than --config, --write-config-to, and --cleanup are deprecated. Please begin using a config file ASAP.")
 		o.applyDeprecatedHealthzPortToConfig()
-		o.applyDeprecatedMetricsPortToConfig()
 	}
 
 	// Load the config file here in Complete, so that Validate validates the fully-resolved config.
@@ -224,61 +199,11 @@ func (o *Options) Complete() error {
 		} else {
 			o.config = c
 		}
-
-		if err := o.initWatcher(); err != nil {
-			return err
-		}
 	}
 
-	if err := o.processHostnameOverrideFlag(); err != nil {
-		return err
-	}
-
-	if err := utilfeature.DefaultMutableFeatureGate.SetFromMap(o.config.FeatureGates); err != nil {
-		return err
-	}
-	return nil
-}
-
-// Creates a new filesystem watcher and adds watches for the config file.
-func (o *Options) initWatcher() error {
-	fswatcher := filesystem.NewFsnotifyWatcher()
-	err := fswatcher.Init(o.eventHandler, o.errorHandler)
+	err := utilfeature.DefaultFeatureGate.SetFromMap(o.config.FeatureGates)
 	if err != nil {
 		return err
-	}
-	err = fswatcher.AddWatch(o.ConfigFile)
-	if err != nil {
-		return err
-	}
-	o.watcher = fswatcher
-	return nil
-}
-
-func (o *Options) eventHandler(ent fsnotify.Event) {
-	eventOpIs := func(Op fsnotify.Op) bool {
-		return ent.Op&Op == Op
-	}
-	if eventOpIs(fsnotify.Write) || eventOpIs(fsnotify.Rename) {
-		// error out when ConfigFile is updated
-		o.errCh <- fmt.Errorf("content of the proxy server's configuration file was updated")
-	}
-	o.errCh <- nil
-}
-
-func (o *Options) errorHandler(err error) {
-	o.errCh <- err
-}
-
-// processHostnameOverrideFlag processes hostname-override flag
-func (o *Options) processHostnameOverrideFlag() error {
-	// Check if hostname-override flag is set and use value since configFile always overrides
-	if len(o.hostnameOverride) > 0 {
-		hostName := strings.TrimSpace(o.hostnameOverride)
-		if len(hostName) == 0 {
-			return fmt.Errorf("empty hostname-override is invalid")
-		}
-		o.config.HostnameOverride = strings.ToLower(hostName)
 	}
 
 	return nil
@@ -289,6 +214,7 @@ func (o *Options) Validate(args []string) error {
 	if len(args) != 0 {
 		return errors.New("no arguments are supported")
 	}
+
 	if errs := validation.Validate(o.config); len(errs) != 0 {
 		return errs.ToAggregate()
 	}
@@ -297,7 +223,6 @@ func (o *Options) Validate(args []string) error {
 }
 
 func (o *Options) Run() error {
-	defer close(o.errCh)
 	if len(o.WriteConfigTo) > 0 {
 		return o.writeConfigFile()
 	}
@@ -306,31 +231,8 @@ func (o *Options) Run() error {
 	if err != nil {
 		return err
 	}
-	o.proxyServer = proxyServer
-	return o.runLoop()
-}
 
-// runLoop will watch on the update change of the proxy server's configuration file.
-// Return an error when updated
-func (o *Options) runLoop() error {
-	if o.watcher != nil {
-		o.watcher.Run()
-	}
-
-	// run the proxy in goroutine
-	go func() {
-		err := o.proxyServer.Run()
-		o.errCh <- err
-	}()
-
-	for {
-		select {
-		case err := <-o.errCh:
-			if err != nil {
-				return err
-			}
-		}
-	}
+	return proxyServer.Run()
 }
 
 func (o *Options) writeConfigFile() error {
@@ -352,14 +254,13 @@ func (o *Options) writeConfigFile() error {
 	if err != nil {
 		return err
 	}
-	// TODO handle error
 	defer configFile.Close()
 
 	if err := encoder.Encode(o.config, configFile); err != nil {
 		return err
 	}
 
-	klog.Infof("Wrote configuration to: %s\n", o.WriteConfigTo)
+	glog.Infof("Wrote configuration to: %s\n", o.WriteConfigTo)
 
 	return nil
 }
@@ -384,20 +285,6 @@ func (o *Options) applyDeprecatedHealthzPortToConfig() {
 	o.config.HealthzBindAddress = fmt.Sprintf("%s:%d", o.config.HealthzBindAddress, o.healthzPort)
 }
 
-func (o *Options) applyDeprecatedMetricsPortToConfig() {
-	if o.metricsPort == 0 {
-		o.config.MetricsBindAddress = ""
-		return
-	}
-
-	index := strings.Index(o.config.MetricsBindAddress, ":")
-	if index != -1 {
-		o.config.MetricsBindAddress = o.config.MetricsBindAddress[0:index]
-	}
-
-	o.config.MetricsBindAddress = fmt.Sprintf("%s:%d", o.config.MetricsBindAddress, o.metricsPort)
-}
-
 // loadConfigFromFile loads the contents of file and decodes it as a
 // KubeProxyConfiguration object.
 func (o *Options) loadConfigFromFile(file string) (*kubeproxyconfig.KubeProxyConfiguration, error) {
@@ -415,11 +302,11 @@ func (o *Options) loadConfig(data []byte) (*kubeproxyconfig.KubeProxyConfigurati
 	if err != nil {
 		return nil, err
 	}
-	proxyConfig, ok := configObj.(*kubeproxyconfig.KubeProxyConfiguration)
+	config, ok := configObj.(*kubeproxyconfig.KubeProxyConfiguration)
 	if !ok {
 		return nil, fmt.Errorf("got unexpected config type: %v", gvk)
 	}
-	return proxyConfig, nil
+	return config, nil
 }
 
 func (o *Options) ApplyDefaults(in *kubeproxyconfig.KubeProxyConfiguration) (*kubeproxyconfig.KubeProxyConfiguration, error) {
@@ -458,28 +345,27 @@ with the apiserver API to configure the proxy.`,
 			utilflag.PrintFlags(cmd.Flags())
 
 			if err := initForOS(opts.WindowsService); err != nil {
-				klog.Fatalf("failed OS init: %v", err)
+				glog.Fatalf("failed OS init: %v", err)
 			}
 
 			if err := opts.Complete(); err != nil {
-				klog.Fatalf("failed complete: %v", err)
+				glog.Fatalf("failed complete: %v", err)
 			}
 			if err := opts.Validate(args); err != nil {
-				klog.Fatalf("failed validate: %v", err)
+				glog.Fatalf("failed validate: %v", err)
 			}
-			klog.Fatal(opts.Run())
+			glog.Fatal(opts.Run())
 		},
 	}
 
 	var err error
 	opts.config, err = opts.ApplyDefaults(opts.config)
 	if err != nil {
-		klog.Fatalf("unable to create flag defaults: %v", err)
+		glog.Fatalf("unable to create flag defaults: %v", err)
 	}
 
 	opts.AddFlags(cmd.Flags())
 
-	// TODO handle error
 	cmd.MarkFlagFilename("config", "yaml", "yml", "json")
 
 	return cmd
@@ -515,12 +401,12 @@ type ProxyServer struct {
 
 // createClients creates a kube client and an event client from the given config and masterOverride.
 // TODO remove masterOverride when CLI flags are removed.
-func createClients(config componentbaseconfig.ClientConnectionConfiguration, masterOverride string) (clientset.Interface, v1core.EventsGetter, error) {
+func createClients(config apimachineryconfig.ClientConnectionConfiguration, masterOverride string) (clientset.Interface, v1core.EventsGetter, error) {
 	var kubeConfig *rest.Config
 	var err error
 
 	if len(config.Kubeconfig) == 0 && len(masterOverride) == 0 {
-		klog.Info("Neither kubeconfig file nor master URL was specified. Falling back to in-cluster config.")
+		glog.Info("Neither kubeconfig file nor master URL was specified. Falling back to in-cluster config.")
 		kubeConfig, err = rest.InClusterConfig()
 	} else {
 		// This creates a client, first loading any specified kubeconfig
@@ -536,6 +422,7 @@ func createClients(config componentbaseconfig.ClientConnectionConfiguration, mas
 	kubeConfig.AcceptContentTypes = config.AcceptContentTypes
 	kubeConfig.ContentType = config.ContentType
 	kubeConfig.QPS = config.QPS
+	//TODO make config struct use int instead of int32?
 	kubeConfig.Burst = int(config.Burst)
 
 	client, err := clientset.NewForConfig(kubeConfig)
@@ -554,14 +441,14 @@ func createClients(config componentbaseconfig.ClientConnectionConfiguration, mas
 // Run runs the specified ProxyServer.  This should never exit (unless CleanupAndExit is set).
 func (s *ProxyServer) Run() error {
 	// To help debugging, immediately log version
-	klog.Infof("Version: %+v", version.Get())
+	glog.Infof("Version: %+v", version.Get())
 	// remove iptables rules and exit
 	if s.CleanupAndExit {
 		encounteredError := userspace.CleanupLeftovers(s.IptInterface)
 		encounteredError = iptables.CleanupLeftovers(s.IptInterface) || encounteredError
 		encounteredError = ipvs.CleanupLeftovers(s.IpvsInterface, s.IptInterface, s.IpsetInterface, s.CleanupIPVS) || encounteredError
 		if encounteredError {
-			return errors.New("encountered an error while tearing down rules")
+			return errors.New("encountered an error while tearing down rules.")
 		}
 		return nil
 	}
@@ -571,16 +458,16 @@ func (s *ProxyServer) Run() error {
 	if s.OOMScoreAdj != nil {
 		oomAdjuster = oom.NewOOMAdjuster()
 		if err := oomAdjuster.ApplyOOMScoreAdj(0, int(*s.OOMScoreAdj)); err != nil {
-			klog.V(2).Info(err)
+			glog.V(2).Info(err)
 		}
 	}
 
 	if len(s.ResourceContainer) != 0 {
 		// Run in its own container.
 		if err := resourcecontainer.RunInResourceContainer(s.ResourceContainer); err != nil {
-			klog.Warningf("Failed to start in resource-only container %q: %v", s.ResourceContainer, err)
+			glog.Warningf("Failed to start in resource-only container %q: %v", s.ResourceContainer, err)
 		} else {
-			klog.V(2).Infof("Running in resource-only container %q", s.ResourceContainer)
+			glog.V(2).Infof("Running in resource-only container %q", s.ResourceContainer)
 		}
 	}
 
@@ -595,18 +482,18 @@ func (s *ProxyServer) Run() error {
 
 	// Start up a metrics server if requested
 	if len(s.MetricsBindAddress) > 0 {
-		proxyMux := mux.NewPathRecorderMux("kube-proxy")
-		healthz.InstallHandler(proxyMux)
-		proxyMux.HandleFunc("/proxyMode", func(w http.ResponseWriter, r *http.Request) {
+		mux := mux.NewPathRecorderMux("kube-proxy")
+		healthz.InstallHandler(mux)
+		mux.HandleFunc("/proxyMode", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "%s", s.ProxyMode)
 		})
-		proxyMux.Handle("/metrics", prometheus.Handler())
+		mux.Handle("/metrics", prometheus.Handler())
 		if s.EnableProfiling {
-			routes.Profiling{}.Install(proxyMux)
+			routes.Profiling{}.Install(mux)
 		}
-		configz.InstallHandler(proxyMux)
+		configz.InstallHandler(mux)
 		go wait.Until(func() {
-			err := http.ListenAndServe(s.MetricsBindAddress, proxyMux)
+			err := http.ListenAndServe(s.MetricsBindAddress, mux)
 			if err != nil {
 				utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
 			}
@@ -623,18 +510,17 @@ func (s *ProxyServer) Run() error {
 		if max > 0 {
 			err := s.Conntracker.SetMax(max)
 			if err != nil {
-				if err != errReadOnlySysFS {
+				if err != readOnlySysFSError {
 					return err
 				}
-				// errReadOnlySysFS is caused by a known docker issue (https://github.com/docker/docker/issues/24000),
+				// readOnlySysFSError is caused by a known docker issue (https://github.com/docker/docker/issues/24000),
 				// the only remediation we know is to restart the docker daemon.
 				// Here we'll send an node event with specific reason and message, the
 				// administrator should decide whether and how to handle this issue,
-				// whether to drain the node and restart docker.  Occurs in other container runtimes
-				// as well.
+				// whether to drain the node and restart docker.
 				// TODO(random-liu): Remove this when the docker bug is fixed.
-				const message = "CRI error: /sys is read-only: " +
-					"cannot modify conntrack limits, problems may arise later (If running Docker, see docker issue #24000)"
+				const message = "DOCKER RESTART NEEDED (docker issue #24000): /sys is read-only: " +
+					"cannot modify conntrack limits, problems may arise later."
 				s.Recorder.Eventf(s.NodeRef, api.EventTypeWarning, err.Error(), message)
 			}
 		}
@@ -654,10 +540,7 @@ func (s *ProxyServer) Run() error {
 		}
 	}
 
-	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.Client, s.ConfigSyncPeriod,
-		informers.WithTweakListOptions(func(options *v1meta.ListOptions) {
-			options.LabelSelector = "!" + apis.LabelServiceProxyName
-		}))
+	informerFactory := informers.NewSharedInformerFactory(s.Client, s.ConfigSyncPeriod)
 
 	// Create configs (i.e. Watches for Services and Endpoints)
 	// Note: RegisterHandler() calls need to happen before creation of Sources because sources
@@ -692,7 +575,7 @@ func getConntrackMax(config kubeproxyconfig.KubeProxyConntrackConfiguration) (in
 		if config.MaxPerCore != nil && *config.MaxPerCore > 0 {
 			return -1, fmt.Errorf("invalid config: Conntrack Max and Conntrack MaxPerCore are mutually exclusive")
 		}
-		klog.V(3).Infof("getConntrackMax: using absolute conntrack-max (deprecated)")
+		glog.V(3).Infof("getConntrackMax: using absolute conntrack-max (deprecated)")
 		return int(*config.Max), nil
 	}
 	if config.MaxPerCore != nil && *config.MaxPerCore > 0 {
@@ -702,10 +585,10 @@ func getConntrackMax(config kubeproxyconfig.KubeProxyConntrackConfiguration) (in
 		}
 		scaled := int(*config.MaxPerCore) * goruntime.NumCPU()
 		if scaled > floor {
-			klog.V(3).Infof("getConntrackMax: using scaled conntrack-max-per-core")
+			glog.V(3).Infof("getConntrackMax: using scaled conntrack-max-per-core")
 			return scaled, nil
 		}
-		klog.V(3).Infof("getConntrackMax: using conntrack-min")
+		glog.V(3).Infof("getConntrackMax: using conntrack-min")
 		return floor, nil
 	}
 	return 0, nil

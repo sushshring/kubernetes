@@ -194,10 +194,7 @@ func computeReconciledRole(existing, expected RuleOwner, removeExtraPermissions 
 	}
 
 	// Compute extra and missing rules
-	// Don't compute extra permissions if expected and existing roles are both aggregated
-	if expected.GetAggregationRule() == nil || existing.GetAggregationRule() == nil {
-		_, result.ExtraRules = validation.Covers(expected.GetRules(), existing.GetRules())
-	}
+	_, result.ExtraRules = validation.Covers(expected.GetRules(), existing.GetRules())
 	_, result.MissingRules = validation.Covers(existing.GetRules(), expected.GetRules())
 
 	switch {

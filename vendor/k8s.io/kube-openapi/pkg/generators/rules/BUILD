@@ -5,7 +5,6 @@ go_library(
     srcs = [
         "doc.go",
         "names_match.go",
-        "omitempty_match_case.go",
     ],
     importmap = "k8s.io/kubernetes/vendor/k8s.io/kube-openapi/pkg/generators/rules",
     importpath = "k8s.io/kube-openapi/pkg/generators/rules",

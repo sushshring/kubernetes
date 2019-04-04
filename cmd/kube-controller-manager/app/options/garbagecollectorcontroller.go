@@ -19,12 +19,14 @@ package options
 import (
 	"github.com/spf13/pflag"
 
-	garbagecollectorconfig "k8s.io/kubernetes/pkg/controller/garbagecollector/config"
+	kubectrlmgrconfig "k8s.io/kubernetes/pkg/controller/apis/config"
 )
 
 // GarbageCollectorControllerOptions holds the GarbageCollectorController options.
 type GarbageCollectorControllerOptions struct {
-	*garbagecollectorconfig.GarbageCollectorControllerConfiguration
+	ConcurrentGCSyncs      int32
+	GCIgnoredResources     []kubectrlmgrconfig.GroupResource
+	EnableGarbageCollector bool
 }
 
 // AddFlags adds flags related to GarbageCollectorController for controller manager to the specified FlagSet.
@@ -38,7 +40,7 @@ func (o *GarbageCollectorControllerOptions) AddFlags(fs *pflag.FlagSet) {
 }
 
 // ApplyTo fills up GarbageCollectorController config with options.
-func (o *GarbageCollectorControllerOptions) ApplyTo(cfg *garbagecollectorconfig.GarbageCollectorControllerConfiguration) error {
+func (o *GarbageCollectorControllerOptions) ApplyTo(cfg *kubectrlmgrconfig.GarbageCollectorControllerConfiguration) error {
 	if o == nil {
 		return nil
 	}

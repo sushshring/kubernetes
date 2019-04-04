@@ -31,7 +31,6 @@ import (
 	kubeletmetrics "k8s.io/kubernetes/pkg/kubelet/metrics"
 	"k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/framework/metrics"
-	"k8s.io/kubernetes/test/e2e/storage/testsuites"
 	"k8s.io/kubernetes/test/e2e/storage/utils"
 )
 
@@ -42,7 +41,7 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 		c              clientset.Interface
 		ns             string
 		pvc            *v1.PersistentVolumeClaim
-		metricsGrabber *metrics.Grabber
+		metricsGrabber *metrics.MetricsGrabber
 	)
 	f := framework.NewDefaultFramework("pv")
 
@@ -53,9 +52,9 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 		defaultScName := getDefaultStorageClassName(c)
 		verifyDefaultStorageClass(c, defaultScName, true)
 
-		test := testsuites.StorageClassTest{
-			Name:      "default",
-			ClaimSize: "2Gi",
+		test := storageClassTest{
+			name:      "default",
+			claimSize: "2Gi",
 		}
 
 		pvc = newClaim(test, ns, "default")
@@ -80,19 +79,19 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 
 		controllerMetrics, err := metricsGrabber.GrabFromControllerManager()
 
-		framework.ExpectNoError(err, "Error getting c-m metrics : %v", err)
+		Expect(err).NotTo(HaveOccurred(), "Error getting c-m metrics : %v", err)
 
 		storageOpMetrics := getControllerStorageMetrics(controllerMetrics)
 
 		pvc, err = c.CoreV1().PersistentVolumeClaims(pvc.Namespace).Create(pvc)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(pvc).ToNot(Equal(nil))
 
 		claims := []*v1.PersistentVolumeClaim{pvc}
 
 		pod := framework.MakePod(ns, nil, claims, false, "")
 		pod, err = c.CoreV1().Pods(ns).Create(pod)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 
 		err = framework.WaitForPodRunningInNamespace(c, pod)
 		framework.ExpectNoError(framework.WaitForPodRunningInNamespace(c, pod), "Error starting pod ", pod.Name)
@@ -114,19 +113,19 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 	It("should create volume metrics with the correct PVC ref", func() {
 		var err error
 		pvc, err = c.CoreV1().PersistentVolumeClaims(pvc.Namespace).Create(pvc)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(pvc).ToNot(Equal(nil))
 
 		claims := []*v1.PersistentVolumeClaim{pvc}
 		pod := framework.MakePod(ns, nil, claims, false, "")
 		pod, err = c.CoreV1().Pods(ns).Create(pod)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 
 		err = framework.WaitForPodRunningInNamespace(c, pod)
 		framework.ExpectNoError(framework.WaitForPodRunningInNamespace(c, pod), "Error starting pod ", pod.Name)
 
 		pod, err = c.CoreV1().Pods(ns).Get(pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 
 		// Verify volume stat metrics were collected for the referenced PVC
 		volumeStatKeys := []string{
@@ -156,7 +155,7 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 			}
 			return true, nil
 		})
-		framework.ExpectNoError(waitErr, "Error finding volume metrics : %v", waitErr)
+		Expect(waitErr).NotTo(HaveOccurred(), "Error finding volume metrics : %v", waitErr)
 
 		for _, key := range volumeStatKeys {
 			kubeletKeyName := fmt.Sprintf("%s_%s", kubeletmetrics.KubeletSubsystem, key)
@@ -171,19 +170,19 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 	It("should create metrics for total time taken in volume operations in P/V Controller", func() {
 		var err error
 		pvc, err = c.CoreV1().PersistentVolumeClaims(pvc.Namespace).Create(pvc)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(pvc).ToNot(Equal(nil))
 
 		claims := []*v1.PersistentVolumeClaim{pvc}
 		pod := framework.MakePod(ns, nil, claims, false, "")
 		pod, err = c.CoreV1().Pods(ns).Create(pod)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 
 		err = framework.WaitForPodRunningInNamespace(c, pod)
 		framework.ExpectNoError(framework.WaitForPodRunningInNamespace(c, pod), "Error starting pod ", pod.Name)
 
 		pod, err = c.CoreV1().Pods(ns).Get(pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 
 		controllerMetrics, err := metricsGrabber.GrabFromControllerManager()
 		if err != nil {
@@ -202,22 +201,22 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 	It("should create volume metrics in Volume Manager", func() {
 		var err error
 		pvc, err = c.CoreV1().PersistentVolumeClaims(pvc.Namespace).Create(pvc)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(pvc).ToNot(Equal(nil))
 
 		claims := []*v1.PersistentVolumeClaim{pvc}
 		pod := framework.MakePod(ns, nil, claims, false, "")
 		pod, err = c.CoreV1().Pods(ns).Create(pod)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 
 		err = framework.WaitForPodRunningInNamespace(c, pod)
 		framework.ExpectNoError(framework.WaitForPodRunningInNamespace(c, pod), "Error starting pod ", pod.Name)
 
 		pod, err = c.CoreV1().Pods(ns).Get(pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 
 		kubeMetrics, err := metricsGrabber.GrabFromKubelet(pod.Spec.NodeName)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 
 		// Metrics should have dimensions plugin_name and state available
 		totalVolumesKey := "volume_manager_total_volumes"
@@ -232,7 +231,7 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 	It("should create metrics for total number of volumes in A/D Controller", func() {
 		var err error
 		pvc, err = c.CoreV1().PersistentVolumeClaims(pvc.Namespace).Create(pvc)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(pvc).ToNot(Equal(nil))
 
 		claims := []*v1.PersistentVolumeClaim{pvc}
@@ -246,11 +245,11 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 
 		// Create pod
 		pod, err = c.CoreV1().Pods(ns).Create(pod)
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 		err = framework.WaitForPodRunningInNamespace(c, pod)
 		framework.ExpectNoError(framework.WaitForPodRunningInNamespace(c, pod), "Error starting pod ", pod.Name)
 		pod, err = c.CoreV1().Pods(ns).Get(pod.Name, metav1.GetOptions{})
-		framework.ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 
 		// Get updated metrics
 		updatedControllerMetrics, err := metricsGrabber.GrabFromControllerManager()
@@ -340,7 +339,7 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 				"Wrong metric size: %d", len(metricValues))
 
 			controllerMetrics, err := metricsGrabber.GrabFromControllerManager()
-			framework.ExpectNoError(err, "Error getting c-m metricValues: %v", err)
+			Expect(err).NotTo(HaveOccurred(), "Error getting c-m metricValues: %v", err)
 
 			for i, metric := range metrics {
 				expectValues := metricValues[i]
@@ -368,7 +367,7 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 
 			// Initializes all original metric values.
 			controllerMetrics, err := metricsGrabber.GrabFromControllerManager()
-			framework.ExpectNoError(err, "Error getting c-m metricValues: %v", err)
+			Expect(err).NotTo(HaveOccurred(), "Error getting c-m metricValues: %v", err)
 			for _, metric := range metrics {
 				originMetricValues = append(originMetricValues,
 					getPVControllerMetrics(controllerMetrics, metric.name, metric.dimension))
@@ -395,7 +394,7 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 			func() {
 				var err error
 				pv, err = framework.CreatePV(c, pv)
-				framework.ExpectNoError(err, "Error creating pv: %v", err)
+				Expect(err).NotTo(HaveOccurred(), "Error creating pv: %v", err)
 				waitForPVControllerSync(metricsGrabber, unboundPVKey, classKey)
 				validator([]map[string]int64{nil, {className: 1}, nil, nil})
 			})
@@ -404,7 +403,7 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 			func() {
 				var err error
 				pvc, err = framework.CreatePVC(c, ns, pvc)
-				framework.ExpectNoError(err, "Error creating pvc: %v", err)
+				Expect(err).NotTo(HaveOccurred(), "Error creating pvc: %v", err)
 				waitForPVControllerSync(metricsGrabber, unboundPVCKey, namespaceKey)
 				validator([]map[string]int64{nil, nil, nil, {ns: 1}})
 			})
@@ -413,7 +412,7 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 			func() {
 				var err error
 				pv, pvc, err = framework.CreatePVPVC(c, pvConfig, pvcConfig, ns, true)
-				framework.ExpectNoError(err, "Error creating pv pvc: %v", err)
+				Expect(err).NotTo(HaveOccurred(), "Error creating pv pvc: %v", err)
 				waitForPVControllerSync(metricsGrabber, boundPVKey, classKey)
 				waitForPVControllerSync(metricsGrabber, boundPVCKey, namespaceKey)
 				validator([]map[string]int64{{className: 1}, nil, {ns: 1}, nil})
@@ -422,7 +421,7 @@ var _ = utils.SIGDescribe("[Serial] Volume metrics", func() {
 	})
 })
 
-func waitForDetachAndGrabMetrics(oldMetrics map[string]int64, metricsGrabber *metrics.Grabber) map[string]int64 {
+func waitForDetachAndGrabMetrics(oldMetrics map[string]int64, metricsGrabber *metrics.MetricsGrabber) map[string]int64 {
 	backoff := wait.Backoff{
 		Duration: 10 * time.Second,
 		Factor:   1.2,
@@ -460,7 +459,7 @@ func waitForDetachAndGrabMetrics(oldMetrics map[string]int64, metricsGrabber *me
 	}
 
 	waitErr := wait.ExponentialBackoff(backoff, verifyMetricFunc)
-	framework.ExpectNoError(waitErr, "Timeout error fetching storage c-m metrics : %v", waitErr)
+	Expect(waitErr).NotTo(HaveOccurred(), "Timeout error fetching storage c-m metrics : %v", waitErr)
 	return updatedStorageMetrics
 }
 
@@ -527,7 +526,7 @@ func findVolumeStatMetric(metricKeyName string, namespace string, pvcName string
 }
 
 // Wait for the count of a pv controller's metric specified by metricName and dimension bigger than zero.
-func waitForPVControllerSync(metricsGrabber *metrics.Grabber, metricName, dimension string) {
+func waitForPVControllerSync(metricsGrabber *metrics.MetricsGrabber, metricName, dimension string) {
 	backoff := wait.Backoff{
 		Duration: 10 * time.Second,
 		Factor:   1.2,
@@ -542,7 +541,7 @@ func waitForPVControllerSync(metricsGrabber *metrics.Grabber, metricName, dimens
 		return len(getPVControllerMetrics(updatedMetrics, metricName, dimension)) > 0, nil
 	}
 	waitErr := wait.ExponentialBackoff(backoff, verifyMetricFunc)
-	framework.ExpectNoError(waitErr,
+	Expect(waitErr).NotTo(HaveOccurred(),
 		"Timeout error fetching pv controller metrics : %v", waitErr)
 }
 
@@ -608,7 +607,7 @@ func getStatesMetrics(metricKey string, givenMetrics metrics.Metrics) map[string
 	return states
 }
 
-func waitForADControllerStatesMetrics(metricsGrabber *metrics.Grabber, metricName string, dimensions []string, stateNames []string) {
+func waitForADControllerStatesMetrics(metricsGrabber *metrics.MetricsGrabber, metricName string, dimensions []string, stateNames []string) {
 	backoff := wait.Backoff{
 		Duration: 10 * time.Second,
 		Factor:   1.2,
@@ -632,5 +631,5 @@ func waitForADControllerStatesMetrics(metricsGrabber *metrics.Grabber, metricNam
 		return true, nil
 	}
 	waitErr := wait.ExponentialBackoff(backoff, verifyMetricFunc)
-	framework.ExpectNoError(waitErr, "Timeout error fetching A/D controller metrics : %v", waitErr)
+	Expect(waitErr).NotTo(HaveOccurred(), "Timeout error fetching A/D controller metrics : %v", waitErr)
 }

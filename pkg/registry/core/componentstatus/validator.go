@@ -68,8 +68,7 @@ func (server *Server) DoServerCheck() (probe.Result, string, error) {
 		if server.Prober != nil {
 			return
 		}
-		const followNonLocalRedirects = true
-		server.Prober = httpprober.NewWithTLSConfig(server.TLSConfig, followNonLocalRedirects)
+		server.Prober = httpprober.NewWithTLSConfig(server.TLSConfig)
 	})
 
 	scheme := "http"

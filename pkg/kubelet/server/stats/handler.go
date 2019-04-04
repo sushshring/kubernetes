@@ -25,8 +25,8 @@ import (
 	"time"
 
 	restful "github.com/emicklei/go-restful"
+	"github.com/golang/glog"
 	cadvisorapi "github.com/google/cadvisor/info/v1"
-	"k8s.io/klog"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,21 +37,12 @@ import (
 	"k8s.io/kubernetes/pkg/volume"
 )
 
-// Provider hosts methods required by stats handlers.
-type Provider interface {
+// Host methods required by stats handlers.
+type StatsProvider interface {
 	// The following stats are provided by either CRI or cAdvisor.
 	//
 	// ListPodStats returns the stats of all the containers managed by pods.
 	ListPodStats() ([]statsapi.PodStats, error)
-	// ListPodStatsAndUpdateCPUNanoCoreUsage updates the cpu nano core usage for
-	// the containers and returns the stats for all the pod-managed containers.
-	ListPodCPUAndMemoryStats() ([]statsapi.PodStats, error)
-	// ListPodStatsAndUpdateCPUNanoCoreUsage returns the stats of all the
-	// containers managed by pods and force update the cpu usageNanoCores.
-	// This is a workaround for CRI runtimes that do not integrate with
-	// cadvisor. See https://github.com/kubernetes/kubernetes/issues/72788
-	// for more details.
-	ListPodStatsAndUpdateCPUNanoCoreUsage() ([]statsapi.PodStats, error)
 	// ImageFsStats returns the stats of the image filesystem.
 	ImageFsStats() (*statsapi.FsStats, error)
 
@@ -60,9 +51,6 @@ type Provider interface {
 	// GetCgroupStats returns the stats and the networking usage of the cgroup
 	// with the specified cgroupName.
 	GetCgroupStats(cgroupName string, updateStats bool) (*statsapi.ContainerStats, *statsapi.NetworkStats, error)
-	// GetCgroupCPUAndMemoryStats returns the CPU and memory stats of the cgroup with the specified cgroupName.
-	GetCgroupCPUAndMemoryStats(cgroupName string, updateStats bool) (*statsapi.ContainerStats, error)
-
 	// RootFsStats returns the stats of the node root filesystem.
 	RootFsStats() (*statsapi.FsStats, error)
 
@@ -103,12 +91,11 @@ type Provider interface {
 }
 
 type handler struct {
-	provider        Provider
+	provider        StatsProvider
 	summaryProvider SummaryProvider
 }
 
-// CreateHandlers creates the REST handlers for the stats.
-func CreateHandlers(rootPath string, provider Provider, summaryProvider SummaryProvider) *restful.WebService {
+func CreateHandlers(rootPath string, provider StatsProvider, summaryProvider SummaryProvider) *restful.WebService {
 	h := &handler{provider, summaryProvider}
 
 	ws := &restful.WebService{}
@@ -138,7 +125,7 @@ func CreateHandlers(rootPath string, provider Provider, summaryProvider SummaryP
 	return ws
 }
 
-type statsRequest struct {
+type StatsRequest struct {
 	// The name of the container for which to request stats.
 	// Default: /
 	// +optional
@@ -166,7 +153,7 @@ type statsRequest struct {
 	Subcontainers bool `json:"subcontainers,omitempty"`
 }
 
-func (r *statsRequest) cadvisorRequest() *cadvisorapi.ContainerInfoRequest {
+func (r *StatsRequest) cadvisorRequest() *cadvisorapi.ContainerInfoRequest {
 	return &cadvisorapi.ContainerInfoRequest{
 		NumStats: r.NumStats,
 		Start:    r.Start,
@@ -174,9 +161,9 @@ func (r *statsRequest) cadvisorRequest() *cadvisorapi.ContainerInfoRequest {
 	}
 }
 
-func parseStatsRequest(request *restful.Request) (statsRequest, error) {
+func parseStatsRequest(request *restful.Request) (StatsRequest, error) {
 	// Default request.
-	query := statsRequest{
+	query := StatsRequest{
 		NumStats: 60,
 	}
 
@@ -244,7 +231,7 @@ func (h *handler) handleSystemContainer(request *restful.Request, response *rest
 	if err != nil {
 		if _, ok := stats[containerName]; ok {
 			// If the failure is partial, log it and return a best-effort response.
-			klog.Errorf("Partial failure issuing GetRawContainerInfo(%v): %v", query, err)
+			glog.Errorf("Partial failure issuing GetRawContainerInfo(%v): %v", query, err)
 		} else {
 			handleError(response, fmt.Sprintf("/stats/container %v", query), err)
 			return
@@ -280,7 +267,7 @@ func (h *handler) handlePodContainer(request *restful.Request, response *restful
 
 	pod, ok := h.provider.GetPodByName(params["namespace"], params["podName"])
 	if !ok {
-		klog.V(4).Infof("Container not found: %v", params)
+		glog.V(4).Infof("Container not found: %v", params)
 		response.WriteError(http.StatusNotFound, kubecontainer.ErrContainerNotFound)
 		return
 	}
@@ -299,7 +286,7 @@ func (h *handler) handlePodContainer(request *restful.Request, response *restful
 
 func writeResponse(response *restful.Response, stats interface{}) {
 	if err := response.WriteAsJson(stats); err != nil {
-		klog.Errorf("Error writing response: %v", err)
+		glog.Errorf("Error writing response: %v", err)
 	}
 }
 
@@ -311,7 +298,7 @@ func handleError(response *restful.Response, request string, err error) {
 		response.WriteError(http.StatusNotFound, err)
 	default:
 		msg := fmt.Sprintf("Internal Error: %v", err)
-		klog.Errorf("HTTP InternalServerError serving %s: %s", request, msg)
+		glog.Errorf("HTTP InternalServerError serving %s: %s", request, msg)
 		response.WriteErrorString(http.StatusInternalServerError, msg)
 	}
 }

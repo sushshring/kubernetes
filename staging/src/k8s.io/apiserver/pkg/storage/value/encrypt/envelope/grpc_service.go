@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 
 	"google.golang.org/grpc"
 
@@ -54,7 +54,7 @@ type gRPCService struct {
 
 // NewGRPCService returns an envelope.Service which use gRPC to communicate the remote KMS provider.
 func NewGRPCService(endpoint string, callTimeout time.Duration) (Service, error) {
-	klog.V(4).Infof("Configure KMS provider with endpoint: %s", endpoint)
+	glog.V(4).Infof("Configure KMS provider with endpoint: %s", endpoint)
 
 	addr, err := parseEndpoint(endpoint)
 	if err != nil {
@@ -68,7 +68,7 @@ func NewGRPCService(endpoint string, callTimeout time.Duration) (Service, error)
 			// timeout - is ignored since we are connecting in a non-blocking configuration
 			c, err := net.DialTimeout(unixProtocol, addr, 0)
 			if err != nil {
-				klog.Errorf("failed to create connection to unix socket: %s, error: %v", addr, err)
+				glog.Errorf("failed to create connection to unix socket: %s, error: %v", addr, err)
 			}
 			return c, err
 		}))
@@ -129,7 +129,7 @@ func (g *gRPCService) checkAPIVersion(ctx context.Context) error {
 	}
 	g.versionChecked = true
 
-	klog.V(4).Infof("Version of KMS provider is %s", response.Version)
+	glog.V(4).Infof("Version of KMS provider is %s", response.Version)
 	return nil
 }
 

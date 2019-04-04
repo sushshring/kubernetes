@@ -23,13 +23,13 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerimagetypes "github.com/docker/docker/api/types/image"
 	dockerapi "github.com/docker/docker/client"
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 const (
 	// https://docs.docker.com/engine/reference/api/docker_remote_api/
-	// docker version should be at least 1.13.1
-	MinimumDockerAPIVersion = "1.26.0"
+	// docker version should be at least 1.11.x
+	MinimumDockerAPIVersion = "1.23.0"
 
 	// Status of a container returned by ListContainers.
 	StatusRunningPrefix = "Up"
@@ -72,7 +72,7 @@ type Interface interface {
 // DOCKER_HOST, DOCKER_TLS_VERIFY, and DOCKER_CERT path per their spec
 func getDockerClient(dockerEndpoint string) (*dockerapi.Client, error) {
 	if len(dockerEndpoint) > 0 {
-		klog.Infof("Connecting to docker on %s", dockerEndpoint)
+		glog.Infof("Connecting to docker on %s", dockerEndpoint)
 		return dockerapi.NewClient(dockerEndpoint, "", nil, nil)
 	}
 	return dockerapi.NewEnvClient()
@@ -99,8 +99,8 @@ func ConnectToDockerOrDie(dockerEndpoint string, requestTimeout, imagePullProgre
 	}
 	client, err := getDockerClient(dockerEndpoint)
 	if err != nil {
-		klog.Fatalf("Couldn't connect to docker: %v", err)
+		glog.Fatalf("Couldn't connect to docker: %v", err)
 	}
-	klog.Infof("Start docker client with request timeout=%v", requestTimeout)
+	glog.Infof("Start docker client with request timeout=%v", requestTimeout)
 	return newKubeDockerClient(client, requestTimeout, imagePullProgressDeadline)
 }

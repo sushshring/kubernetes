@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/vmware/govmomi/object"
+
 	"github.com/vmware/govmomi/vim25/methods"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/soap"
@@ -177,9 +177,6 @@ func (f *Folder) CreateStoragePod(c *types.CreateStoragePod) soap.HasFault {
 
 		pod.Name = c.Name
 		pod.ChildType = []string{"Datastore"}
-		pod.Summary = new(types.StoragePodSummary)
-		pod.PodStorageDrsEntry = new(types.PodStorageDrsEntry)
-		pod.PodStorageDrsEntry.StorageDrsConfig.PodConfig.Enabled = true
 
 		f.putChild(pod)
 
@@ -194,10 +191,7 @@ func (f *Folder) CreateStoragePod(c *types.CreateStoragePod) soap.HasFault {
 }
 
 func (p *StoragePod) MoveIntoFolderTask(c *types.MoveIntoFolder_Task) soap.HasFault {
-	f := &Folder{Folder: p.Folder}
-	res := f.MoveIntoFolderTask(c)
-	p.ChildEntity = append(p.ChildEntity, f.ChildEntity...)
-	return res
+	return (&Folder{Folder: p.Folder}).MoveIntoFolderTask(c)
 }
 
 func (f *Folder) CreateDatacenter(ctx *Context, c *types.CreateDatacenter) soap.HasFault {
@@ -256,26 +250,9 @@ type createVM struct {
 	register bool
 }
 
-// hostsWithDatastore returns hosts that have access to the given datastore path
-func hostsWithDatastore(hosts []types.ManagedObjectReference, path string) []types.ManagedObjectReference {
-	attached := hosts[:0]
-	var p object.DatastorePath
-	p.FromString(path)
-
-	for _, host := range hosts {
-		h := Map.Get(host).(*HostSystem)
-		if Map.FindByName(p.Datastore, h.Datastore) != nil {
-			attached = append(attached, host)
-		}
-	}
-
-	return attached
-}
-
 func (c *createVM) Run(task *Task) (types.AnyType, types.BaseMethodFault) {
 	vm, err := NewVirtualMachine(c.Folder.Self, &c.req.Config)
 	if err != nil {
-		c.Folder.removeChild(vm)
 		return nil, err
 	}
 
@@ -293,7 +270,7 @@ func (c *createVM) Run(task *Task) (types.AnyType, types.BaseMethodFault) {
 			hosts = cr.Host
 		}
 
-		hosts = hostsWithDatastore(hosts, c.req.Config.Files.VmPathName)
+		// Assuming for now that all hosts have access to the datastore
 		host := hosts[rand.Intn(len(hosts))]
 		vm.Runtime.Host = &host
 	} else {
@@ -313,13 +290,13 @@ func (c *createVM) Run(task *Task) (types.AnyType, types.BaseMethodFault) {
 
 	err = vm.create(&c.req.Config, c.register)
 	if err != nil {
-		c.Folder.removeChild(vm)
 		return nil, err
 	}
 
+	c.Folder.putChild(vm)
+
 	host := Map.Get(*vm.Runtime.Host).(*HostSystem)
 	Map.AppendReference(host, &host.Vm, vm.Self)
-	vm.EnvironmentBrowser = *hostParent(&host.HostSystem).EnvironmentBrowser
 
 	for i := range vm.Datastore {
 		ds := Map.Get(vm.Datastore[i]).(*Datastore)
@@ -355,8 +332,6 @@ func (c *createVM) Run(task *Task) (types.AnyType, types.BaseMethodFault) {
 			VmEvent: event,
 		},
 	)
-
-	vm.RefreshStorageInfo(c.ctx, nil)
 
 	return vm.Reference(), nil
 }

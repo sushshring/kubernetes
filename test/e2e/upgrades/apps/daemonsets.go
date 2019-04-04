@@ -17,25 +17,26 @@ limitations under the License.
 package upgrades
 
 import (
-	"github.com/onsi/ginkgo"
-
-	apps "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/pkg/controller"
+
+	"k8s.io/api/core/v1"
+
+	extensions "k8s.io/api/extensions/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/upgrades"
+
+	. "github.com/onsi/ginkgo"
 )
 
 // DaemonSetUpgradeTest tests that a DaemonSet is running before and after
 // a cluster upgrade.
 type DaemonSetUpgradeTest struct {
-	daemonSet *apps.DaemonSet
+	daemonSet *extensions.DaemonSet
 }
 
-// Name returns the tracking name of the test.
 func (DaemonSetUpgradeTest) Name() string { return "[sig-apps] daemonset-upgrade" }
 
 // Setup creates a DaemonSet and verifies that it's running
@@ -46,23 +47,17 @@ func (t *DaemonSetUpgradeTest) Setup(f *framework.Framework) {
 
 	ns := f.Namespace
 
-	t.daemonSet = &apps.DaemonSet{
+	t.daemonSet = &extensions.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: ns.Name,
 			Name:      daemonSetName,
 		},
-		Spec: apps.DaemonSetSpec{
-			Selector: &metav1.LabelSelector{
-				MatchLabels: labelSet,
-			},
+		Spec: extensions.DaemonSetSpec{
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labelSet,
 				},
 				Spec: v1.PodSpec{
-					Tolerations: []v1.Toleration{
-						{Operator: v1.TolerationOpExists},
-					},
 					Containers: []v1.Container{
 						{
 							Name:  daemonSetName,
@@ -75,29 +70,29 @@ func (t *DaemonSetUpgradeTest) Setup(f *framework.Framework) {
 		},
 	}
 
-	ginkgo.By("Creating a DaemonSet")
+	By("Creating a DaemonSet")
 	var err error
-	if t.daemonSet, err = f.ClientSet.AppsV1().DaemonSets(ns.Name).Create(t.daemonSet); err != nil {
+	if t.daemonSet, err = f.ClientSet.ExtensionsV1beta1().DaemonSets(ns.Name).Create(t.daemonSet); err != nil {
 		framework.Failf("unable to create test DaemonSet %s: %v", t.daemonSet.Name, err)
 	}
 
-	ginkgo.By("Waiting for DaemonSet pods to become ready")
+	By("Waiting for DaemonSet pods to become ready")
 	err = wait.Poll(framework.Poll, framework.PodStartTimeout, func() (bool, error) {
 		return checkRunningOnAllNodes(f, t.daemonSet.Namespace, t.daemonSet.Labels)
 	})
 	framework.ExpectNoError(err)
 
-	ginkgo.By("Validating the DaemonSet after creation")
+	By("Validating the DaemonSet after creation")
 	t.validateRunningDaemonSet(f)
 }
 
 // Test waits until the upgrade has completed and then verifies that the DaemonSet
 // is still running
 func (t *DaemonSetUpgradeTest) Test(f *framework.Framework, done <-chan struct{}, upgrade upgrades.UpgradeType) {
-	ginkgo.By("Waiting for upgradet to complete before re-validating DaemonSet")
+	By("Waiting for upgradet to complete before re-validating DaemonSet")
 	<-done
 
-	ginkgo.By("validating the DaemonSet is still running after upgrade")
+	By("validating the DaemonSet is still running after upgrade")
 	t.validateRunningDaemonSet(f)
 }
 
@@ -107,7 +102,7 @@ func (t *DaemonSetUpgradeTest) Teardown(f *framework.Framework) {
 }
 
 func (t *DaemonSetUpgradeTest) validateRunningDaemonSet(f *framework.Framework) {
-	ginkgo.By("confirming the DaemonSet pods are running on all expected nodes")
+	By("confirming the DaemonSet pods are running on all expected nodes")
 	res, err := checkRunningOnAllNodes(f, t.daemonSet.Namespace, t.daemonSet.Labels)
 	framework.ExpectNoError(err)
 	if !res {
@@ -115,7 +110,7 @@ func (t *DaemonSetUpgradeTest) validateRunningDaemonSet(f *framework.Framework) 
 	}
 
 	// DaemonSet resource itself should be good
-	ginkgo.By("confirming the DaemonSet resource is in a good state")
+	By("confirming the DaemonSet resource is in a good state")
 	res, err = checkDaemonStatus(f, t.daemonSet.Namespace, t.daemonSet.Name)
 	framework.ExpectNoError(err)
 	if !res {
@@ -173,7 +168,7 @@ func checkDaemonPodOnNodes(f *framework.Framework, namespace string, labelSet ma
 }
 
 func checkDaemonStatus(f *framework.Framework, namespace string, dsName string) (bool, error) {
-	ds, err := f.ClientSet.AppsV1().DaemonSets(namespace).Get(dsName, metav1.GetOptions{})
+	ds, err := f.ClientSet.ExtensionsV1beta1().DaemonSets(namespace).Get(dsName, metav1.GetOptions{})
 	if err != nil {
 		return false, err
 	}

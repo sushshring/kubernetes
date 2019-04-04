@@ -11,10 +11,9 @@ go_library(
     importpath = "k8s.io/kubernetes/pkg/windows/service",
     deps = select({
         "@io_bazel_rules_go//go/platform:windows": [
-            "//staging/src/k8s.io/apiserver/pkg/server:go_default_library",
+            "//vendor/github.com/golang/glog:go_default_library",
             "//vendor/golang.org/x/sys/windows:go_default_library",
             "//vendor/golang.org/x/sys/windows/svc:go_default_library",
-            "//vendor/k8s.io/klog:go_default_library",
         ],
         "//conditions:default": [],
     }),

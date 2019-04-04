@@ -39,23 +39,7 @@ func TestProtocolsForObject(t *testing.T) {
 							Ports: []corev1.ContainerPort{
 								{
 									ContainerPort: 101,
-									Protocol:      "TCP",
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		// No protocol--should default to TCP.
-		{
-			object: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Ports: []corev1.ContainerPort{
-								{
-									ContainerPort: 101,
+									Protocol:      "tcp",
 								},
 							},
 						},
@@ -69,19 +53,7 @@ func TestProtocolsForObject(t *testing.T) {
 					Ports: []corev1.ServicePort{
 						{
 							Port:     101,
-							Protocol: "TCP",
-						},
-					},
-				},
-			},
-		},
-		// No protocol for service port--default to TCP
-		{
-			object: &corev1.Service{
-				Spec: corev1.ServiceSpec{
-					Ports: []corev1.ServicePort{
-						{
-							Port: 101,
+							Protocol: "tcp",
 						},
 					},
 				},
@@ -97,7 +69,7 @@ func TestProtocolsForObject(t *testing.T) {
 									Ports: []corev1.ContainerPort{
 										{
 											ContainerPort: 101,
-											Protocol:      "TCP",
+											Protocol:      "tcp",
 										},
 									},
 								},
@@ -117,7 +89,7 @@ func TestProtocolsForObject(t *testing.T) {
 									Ports: []corev1.ContainerPort{
 										{
 											ContainerPort: 101,
-											Protocol:      "TCP",
+											Protocol:      "tcp",
 										},
 									},
 								},
@@ -137,7 +109,7 @@ func TestProtocolsForObject(t *testing.T) {
 									Ports: []corev1.ContainerPort{
 										{
 											ContainerPort: 101,
-											Protocol:      "TCP",
+											Protocol:      "tcp",
 										},
 									},
 								},
@@ -152,7 +124,7 @@ func TestProtocolsForObject(t *testing.T) {
 			expectErr: true,
 		},
 	}
-	expectedPorts := map[string]string{"101": "TCP"}
+	expectedPorts := map[string]string{"101": "tcp"}
 
 	for _, test := range tests {
 		actual, err := protocolsForObject(test.object)

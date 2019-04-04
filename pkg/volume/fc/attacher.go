@@ -23,10 +23,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang/glog"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
@@ -78,7 +78,7 @@ func (attacher *fcAttacher) VolumesAreAttached(specs []*volume.Spec, nodeName ty
 func (attacher *fcAttacher) WaitForAttach(spec *volume.Spec, devicePath string, _ *v1.Pod, timeout time.Duration) (string, error) {
 	mounter, err := volumeSpecToMounter(spec, attacher.host)
 	if err != nil {
-		klog.Warningf("failed to get fc mounter: %v", err)
+		glog.Warningf("failed to get fc mounter: %v", err)
 		return "", err
 	}
 	return attacher.manager.AttachDisk(*mounter)
@@ -88,7 +88,7 @@ func (attacher *fcAttacher) GetDeviceMountPath(
 	spec *volume.Spec) (string, error) {
 	mounter, err := volumeSpecToMounter(spec, attacher.host)
 	if err != nil {
-		klog.Warningf("failed to get fc mounter: %v", err)
+		glog.Warningf("failed to get fc mounter: %v", err)
 		return "", err
 	}
 
@@ -158,11 +158,11 @@ func (detacher *fcDetacher) UnmountDevice(deviceMountPath string) error {
 	// Specify device name for DetachDisk later
 	devName, _, err := mount.GetDeviceNameFromMount(detacher.mounter, deviceMountPath)
 	if err != nil {
-		klog.Errorf("fc: failed to get device from mnt: %s\nError: %v", deviceMountPath, err)
+		glog.Errorf("fc: failed to get device from mnt: %s\nError: %v", deviceMountPath, err)
 		return err
 	}
 	// Unmount for deviceMountPath(=globalPDPath)
-	err = mount.CleanupMountPoint(deviceMountPath, detacher.mounter, false)
+	err = volumeutil.UnmountPath(deviceMountPath, detacher.mounter)
 	if err != nil {
 		return fmt.Errorf("fc: failed to unmount: %s\nError: %v", deviceMountPath, err)
 	}
@@ -171,16 +171,8 @@ func (detacher *fcDetacher) UnmountDevice(deviceMountPath string) error {
 	if err != nil {
 		return fmt.Errorf("fc: failed to detach disk: %s\nError: %v", devName, err)
 	}
-	klog.V(4).Infof("fc: successfully detached disk: %s", devName)
+	glog.V(4).Infof("fc: successfully detached disk: %s", devName)
 	return nil
-}
-
-func (plugin *fcPlugin) CanAttach(spec *volume.Spec) bool {
-	return true
-}
-
-func (plugin *fcPlugin) CanDeviceMount(spec *volume.Spec) (bool, error) {
-	return true, nil
 }
 
 func volumeSpecToMounter(spec *volume.Spec, host volume.VolumeHost) (*fcDiskMounter, error) {
@@ -214,7 +206,7 @@ func volumeSpecToMounter(spec *volume.Spec, host volume.VolumeHost) (*fcDiskMoun
 		if err != nil {
 			return nil, err
 		}
-		klog.V(5).Infof("fc: volumeSpecToMounter volumeMode %s", volumeMode)
+		glog.V(5).Infof("fc: volumeSpecToMounter volumeMode %s", volumeMode)
 		return &fcDiskMounter{
 			fcDisk:     fcDisk,
 			fsType:     fc.FSType,

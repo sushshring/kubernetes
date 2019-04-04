@@ -175,35 +175,32 @@ type testPluginHandler struct {
 	err error
 }
 
-func (h *testPluginHandler) Lookup(filename string) (string, bool) {
-	// append supported plugin prefix to the filename
-	filename = fmt.Sprintf("%s-%s", "kubectl", filename)
-
+func (h *testPluginHandler) Lookup(filename string) (string, error) {
 	dir, err := os.Stat(h.pluginsDirectory)
 	if err != nil {
 		h.err = err
-		return "", false
+		return "", err
 	}
 
 	if !dir.IsDir() {
 		h.err = fmt.Errorf("expected %q to be a directory", h.pluginsDirectory)
-		return "", false
+		return "", h.err
 	}
 
 	plugins, err := ioutil.ReadDir(h.pluginsDirectory)
 	if err != nil {
 		h.err = err
-		return "", false
+		return "", err
 	}
 
 	for _, p := range plugins {
 		if p.Name() == filename {
-			return fmt.Sprintf("%s/%s", h.pluginsDirectory, p.Name()), true
+			return fmt.Sprintf("%s/%s", h.pluginsDirectory, p.Name()), nil
 		}
 	}
 
 	h.err = fmt.Errorf("unable to find a plugin executable %q", filename)
-	return "", false
+	return "", h.err
 }
 
 func (h *testPluginHandler) Execute(executablePath string, cmdArgs, env []string) error {

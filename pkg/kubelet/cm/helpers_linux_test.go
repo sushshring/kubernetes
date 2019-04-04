@@ -274,7 +274,8 @@ func TestResourceConfigForPodWithCustomCPUCFSQuotaPeriod(t *testing.T) {
 	tunedQuotaPeriod := uint64(5 * time.Millisecond / time.Microsecond)
 	tunedQuota := int64(1 * time.Millisecond / time.Microsecond)
 
-	defer utilfeaturetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, pkgfeatures.CPUCFSQuotaPeriod, true)()
+	utilfeaturetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, pkgfeatures.CPUCFSQuotaPeriod, true)
+	defer utilfeaturetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, pkgfeatures.CPUCFSQuotaPeriod, false)
 
 	minShares := uint64(MinShares)
 	burstableShares := MilliCPUToShares(100)

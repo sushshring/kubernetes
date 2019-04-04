@@ -46,16 +46,15 @@ type parentProcess interface {
 }
 
 type setnsProcess struct {
-	cmd             *exec.Cmd
-	parentPipe      *os.File
-	childPipe       *os.File
-	cgroupPaths     map[string]string
-	rootlessCgroups bool
-	intelRdtPath    string
-	config          *initConfig
-	fds             []string
-	process         *Process
-	bootstrapData   io.Reader
+	cmd           *exec.Cmd
+	parentPipe    *os.File
+	childPipe     *os.File
+	cgroupPaths   map[string]string
+	intelRdtPath  string
+	config        *initConfig
+	fds           []string
+	process       *Process
+	bootstrapData io.Reader
 }
 
 func (p *setnsProcess) startTime() (uint64, error) {
@@ -87,7 +86,7 @@ func (p *setnsProcess) start() (err error) {
 		return newSystemErrorWithCause(err, "executing setns process")
 	}
 	if len(p.cgroupPaths) > 0 {
-		if err := cgroups.EnterPid(p.cgroupPaths, p.pid()); err != nil && !p.rootlessCgroups {
+		if err := cgroups.EnterPid(p.cgroupPaths, p.pid()); err != nil {
 			return newSystemErrorWithCausef(err, "adding pid %d to cgroups", p.pid())
 		}
 	}
@@ -538,7 +537,7 @@ func (p *Process) InitializeIO(rootuid, rootgid int) (i *IO, err error) {
 	}
 	fds = append(fds, r.Fd(), w.Fd())
 	p.Stderr, i.Stderr = w, r
-	// change ownership of the pipes in case we are in a user namespace
+	// change ownership of the pipes incase we are in a user namespace
 	for _, fd := range fds {
 		if err := unix.Fchown(int(fd), rootuid, rootgid); err != nil {
 			return nil, err

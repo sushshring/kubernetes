@@ -20,7 +20,6 @@ import (
 	"strings"
 	"testing"
 
-	apps "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	batchv1beta1 "k8s.io/api/batch/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -138,34 +137,32 @@ func TestCreateJob(t *testing.T) {
 
 func TestCreateJobFromCronJob(t *testing.T) {
 	jobName := "test-job"
-	cronJob := &batchv1beta1.CronJob{
-		Spec: batchv1beta1.CronJobSpec{
-			JobTemplate: batchv1beta1.JobTemplateSpec{
-				Spec: batchv1.JobSpec{
-					Template: corev1.PodTemplateSpec{
-						Spec: corev1.PodSpec{
-							Containers: []corev1.Container{
-								{Image: "test-image"},
-							},
-							RestartPolicy: corev1.RestartPolicyNever,
-						},
-					},
-				},
-			},
-		},
-	}
 	tests := map[string]struct {
 		from     *batchv1beta1.CronJob
 		expected *batchv1.Job
 	}{
 		"from CronJob": {
-			from: cronJob,
+			from: &batchv1beta1.CronJob{
+				Spec: batchv1beta1.CronJobSpec{
+					JobTemplate: batchv1beta1.JobTemplateSpec{
+						Spec: batchv1.JobSpec{
+							Template: corev1.PodTemplateSpec{
+								Spec: corev1.PodSpec{
+									Containers: []corev1.Container{
+										{Image: "test-image"},
+									},
+									RestartPolicy: corev1.RestartPolicyNever,
+								},
+							},
+						},
+					},
+				},
+			},
 			expected: &batchv1.Job{
 				TypeMeta: metav1.TypeMeta{APIVersion: batchv1.SchemeGroupVersion.String(), Kind: "Job"},
 				ObjectMeta: metav1.ObjectMeta{
-					Name:            jobName,
-					Annotations:     map[string]string{"cronjob.kubernetes.io/instantiate": "manual"},
-					OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(cronJob, apps.SchemeGroupVersion.WithKind("CronJob"))},
+					Name:        jobName,
+					Annotations: map[string]string{"cronjob.kubernetes.io/instantiate": "manual"},
 				},
 				Spec: batchv1.JobSpec{
 					Template: corev1.PodTemplateSpec{
@@ -187,7 +184,6 @@ func TestCreateJobFromCronJob(t *testing.T) {
 				Name: jobName,
 			}
 			job := o.createJobFromCronJob(tc.from)
-
 			if !apiequality.Semantic.DeepEqual(job, tc.expected) {
 				t.Errorf("expected:\n%#v\ngot:\n%#v", tc.expected, job)
 			}

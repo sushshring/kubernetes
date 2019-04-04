@@ -23,7 +23,6 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,14 +122,10 @@ func parseAddresses(addressesToParse []string) ([]listenAddress, error) {
 	parsed := make(map[string]listenAddress)
 	for _, address := range addressesToParse {
 		if address == "localhost" {
-			if _, exists := parsed["127.0.0.1"]; !exists {
-				ip := listenAddress{address: "127.0.0.1", protocol: "tcp4", failureMode: "all"}
-				parsed[ip.address] = ip
-			}
-			if _, exists := parsed["::1"]; !exists {
-				ip := listenAddress{address: "::1", protocol: "tcp6", failureMode: "all"}
-				parsed[ip.address] = ip
-			}
+			ip := listenAddress{address: "127.0.0.1", protocol: "tcp4", failureMode: "all"}
+			parsed[ip.address] = ip
+			ip = listenAddress{address: "::1", protocol: "tcp6", failureMode: "all"}
+			parsed[ip.address] = ip
 		} else if net.ParseIP(address).To4() != nil {
 			parsed[address] = listenAddress{address: address, protocol: "tcp4", failureMode: "any"}
 		} else if net.ParseIP(address) != nil {
@@ -145,9 +140,6 @@ func parseAddresses(addressesToParse []string) ([]listenAddress, error) {
 		addresses[id] = v
 		id++
 	}
-	// Sort addresses before returning to get a stable order
-	sort.Slice(addresses, func(i, j int) bool { return addresses[i].address < addresses[j].address })
-
 	return addresses, nil
 }
 
@@ -205,9 +197,8 @@ func (pf *PortForwarder) forward() error {
 	var err error
 
 	listenSuccess := false
-	for i := range pf.ports {
-		port := &pf.ports[i]
-		err = pf.listenOnPort(port)
+	for _, port := range pf.ports {
+		err = pf.listenOnPort(&port)
 		switch {
 		case err == nil:
 			listenSuccess = true

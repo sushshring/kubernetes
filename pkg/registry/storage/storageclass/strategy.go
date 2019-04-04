@@ -22,10 +22,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apiserver/pkg/storage/names"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/apis/storage"
 	storageutil "k8s.io/kubernetes/pkg/apis/storage/util"
 	"k8s.io/kubernetes/pkg/apis/storage/validation"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 // storageClassStrategy implements behavior for StorageClass objects
@@ -46,7 +48,11 @@ func (storageClassStrategy) NamespaceScoped() bool {
 func (storageClassStrategy) PrepareForCreate(ctx context.Context, obj runtime.Object) {
 	class := obj.(*storage.StorageClass)
 
-	storageutil.DropDisabledFields(class, nil)
+	if !utilfeature.DefaultFeatureGate.Enabled(features.ExpandPersistentVolumes) {
+		class.AllowVolumeExpansion = nil
+	}
+
+	storageutil.DropDisabledAlphaFields(class)
 }
 
 func (storageClassStrategy) Validate(ctx context.Context, obj runtime.Object) field.ErrorList {
@@ -67,7 +73,12 @@ func (storageClassStrategy) PrepareForUpdate(ctx context.Context, obj, old runti
 	newClass := obj.(*storage.StorageClass)
 	oldClass := old.(*storage.StorageClass)
 
-	storageutil.DropDisabledFields(oldClass, newClass)
+	if !utilfeature.DefaultFeatureGate.Enabled(features.ExpandPersistentVolumes) {
+		newClass.AllowVolumeExpansion = nil
+		oldClass.AllowVolumeExpansion = nil
+	}
+	storageutil.DropDisabledAlphaFields(oldClass)
+	storageutil.DropDisabledAlphaFields(newClass)
 }
 
 func (storageClassStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
