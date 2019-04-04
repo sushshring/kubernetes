@@ -19,8 +19,8 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/pkg/errors"
-	"sigs.k8s.io/yaml"
+	"fmt"
+	"github.com/ghodss/yaml"
 	"testing"
 )
 
@@ -69,30 +69,28 @@ func TestRunVersion(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var err error
-			if len(tc.flag) > 0 {
-				if err = cmd.Flags().Set(flagNameOutput, tc.flag); err != nil {
-					goto error
-				}
-			}
-			buf.Reset()
-			if err = RunVersion(&buf, cmd); err != nil {
+		var err error
+		if len(tc.flag) > 0 {
+			if err = cmd.Flags().Set(flagNameOutput, tc.flag); err != nil {
 				goto error
 			}
-			if buf.String() == "" {
-				err = errors.New("empty output")
-				goto error
-			}
-			if tc.shouldBeValidYAML {
-				err = yaml.Unmarshal(buf.Bytes(), &iface)
-			} else if tc.shouldBeValidJSON {
-				err = json.Unmarshal(buf.Bytes(), &iface)
-			}
-		error:
-			if (err != nil) != tc.expectedError {
-				t.Errorf("Test case %q: RunVersion expected error: %v, saw: %v; %v", tc.name, tc.expectedError, err != nil, err)
-			}
-		})
+		}
+		buf.Reset()
+		if err = RunVersion(&buf, cmd); err != nil {
+			goto error
+		}
+		if buf.String() == "" {
+			err = fmt.Errorf("empty output")
+			goto error
+		}
+		if tc.shouldBeValidYAML {
+			err = yaml.Unmarshal(buf.Bytes(), &iface)
+		} else if tc.shouldBeValidJSON {
+			err = json.Unmarshal(buf.Bytes(), &iface)
+		}
+	error:
+		if (err != nil) != tc.expectedError {
+			t.Errorf("Test case %q: RunVersion expected error: %v, saw: %v; %v", tc.name, tc.expectedError, err != nil, err)
+		}
 	}
 }

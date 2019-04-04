@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
+	"k8s.io/api/apps/v1beta1"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,11 +30,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
-	typedappsv1 "k8s.io/client-go/kubernetes/typed/apps/v1"
+	typedv1beta1 "k8s.io/client-go/kubernetes/typed/apps/v1beta1"
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
-
 	//svc "k8s.io/kubernetes/pkg/api/v1/service"
 	"k8s.io/kubernetes/pkg/controller/statefulset"
 	"k8s.io/kubernetes/test/integration/framework"
@@ -52,7 +51,7 @@ type statefulsetTester struct {
 	t           *testing.T
 	c           clientset.Interface
 	service     *v1.Service
-	statefulset *appsv1.StatefulSet
+	statefulset *v1beta1.StatefulSet
 }
 
 func labelMap() map[string]string {
@@ -81,19 +80,19 @@ func newHeadlessService(namespace string) *v1.Service {
 }
 
 // newSTS returns a StatefulSet with a fake container image
-func newSTS(name, namespace string, replicas int) *appsv1.StatefulSet {
+func newSTS(name, namespace string, replicas int) *v1beta1.StatefulSet {
 	replicasCopy := int32(replicas)
-	return &appsv1.StatefulSet{
+	return &v1beta1.StatefulSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "StatefulSet",
-			APIVersion: "apps/v1",
+			APIVersion: "apps/v1beta1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: namespace,
 			Name:      name,
 		},
-		Spec: appsv1.StatefulSetSpec{
-			PodManagementPolicy: appsv1.ParallelPodManagement,
+		Spec: v1beta1.StatefulSetSpec{
+			PodManagementPolicy: v1beta1.ParallelPodManagement,
 			Replicas:            &replicasCopy,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labelMap(),
@@ -134,8 +133,8 @@ func newSTS(name, namespace string, replicas int) *appsv1.StatefulSet {
 				},
 			},
 			ServiceName: "fake-service-name",
-			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
-				Type: appsv1.RollingUpdateStatefulSetStrategyType,
+			UpdateStrategy: v1beta1.StatefulSetUpdateStrategy{
+				Type: v1beta1.RollingUpdateStatefulSetStrategyType,
 			},
 			VolumeClaimTemplates: []v1.PersistentVolumeClaim{
 				// for volume mount "datadir"
@@ -199,24 +198,24 @@ func runControllerAndInformers(sc *statefulset.StatefulSetController, informers 
 }
 
 func createHeadlessService(t *testing.T, clientSet clientset.Interface, headlessService *v1.Service) {
-	_, err := clientSet.CoreV1().Services(headlessService.Namespace).Create(headlessService)
+	_, err := clientSet.Core().Services(headlessService.Namespace).Create(headlessService)
 	if err != nil {
 		t.Fatalf("failed creating headless service: %v", err)
 	}
 }
 
-func createSTSsPods(t *testing.T, clientSet clientset.Interface, stss []*appsv1.StatefulSet, pods []*v1.Pod) ([]*appsv1.StatefulSet, []*v1.Pod) {
-	var createdSTSs []*appsv1.StatefulSet
+func createSTSsPods(t *testing.T, clientSet clientset.Interface, stss []*v1beta1.StatefulSet, pods []*v1.Pod) ([]*v1beta1.StatefulSet, []*v1.Pod) {
+	var createdSTSs []*v1beta1.StatefulSet
 	var createdPods []*v1.Pod
 	for _, sts := range stss {
-		createdSTS, err := clientSet.AppsV1().StatefulSets(sts.Namespace).Create(sts)
+		createdSTS, err := clientSet.AppsV1beta1().StatefulSets(sts.Namespace).Create(sts)
 		if err != nil {
 			t.Fatalf("failed to create sts %s: %v", sts.Name, err)
 		}
 		createdSTSs = append(createdSTSs, createdSTS)
 	}
 	for _, pod := range pods {
-		createdPod, err := clientSet.CoreV1().Pods(pod.Namespace).Create(pod)
+		createdPod, err := clientSet.Core().Pods(pod.Namespace).Create(pod)
 		if err != nil {
 			t.Fatalf("failed to create pod %s: %v", pod.Name, err)
 		}
@@ -227,15 +226,15 @@ func createSTSsPods(t *testing.T, clientSet clientset.Interface, stss []*appsv1.
 }
 
 // Verify .Status.Replicas is equal to .Spec.Replicas
-func waitSTSStable(t *testing.T, clientSet clientset.Interface, sts *appsv1.StatefulSet) {
-	stsClient := clientSet.AppsV1().StatefulSets(sts.Namespace)
+func waitSTSStable(t *testing.T, clientSet clientset.Interface, sts *v1beta1.StatefulSet) {
+	stsClient := clientSet.AppsV1beta1().StatefulSets(sts.Namespace)
 	desiredGeneration := sts.Generation
 	if err := wait.PollImmediate(pollInterval, pollTimeout, func() (bool, error) {
 		newSTS, err := stsClient.Get(sts.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
-		return newSTS.Status.Replicas == *newSTS.Spec.Replicas && newSTS.Status.ObservedGeneration >= desiredGeneration, nil
+		return newSTS.Status.Replicas == *newSTS.Spec.Replicas && *newSTS.Status.ObservedGeneration >= desiredGeneration, nil
 	}); err != nil {
 		t.Fatalf("failed to verify .Status.Replicas is equal to .Spec.Replicas for sts %s: %v", sts.Name, err)
 	}
@@ -286,8 +285,8 @@ func getPods(t *testing.T, podClient typedv1.PodInterface, labelMap map[string]s
 	return pods
 }
 
-func updateSTS(t *testing.T, stsClient typedappsv1.StatefulSetInterface, stsName string, updateFunc func(*appsv1.StatefulSet)) *appsv1.StatefulSet {
-	var sts *appsv1.StatefulSet
+func updateSTS(t *testing.T, stsClient typedv1beta1.StatefulSetInterface, stsName string, updateFunc func(*v1beta1.StatefulSet)) *v1beta1.StatefulSet {
+	var sts *v1beta1.StatefulSet
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		newSTS, err := stsClient.Get(stsName, metav1.GetOptions{})
 		if err != nil {
@@ -303,8 +302,8 @@ func updateSTS(t *testing.T, stsClient typedappsv1.StatefulSetInterface, stsName
 }
 
 // Update .Spec.Replicas to replicas and verify .Status.Replicas is changed accordingly
-func scaleSTS(t *testing.T, c clientset.Interface, sts *appsv1.StatefulSet, replicas int32) {
-	stsClient := c.AppsV1().StatefulSets(sts.Namespace)
+func scaleSTS(t *testing.T, c clientset.Interface, sts *v1beta1.StatefulSet, replicas int32) {
+	stsClient := c.AppsV1beta1().StatefulSets(sts.Namespace)
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		newSTS, err := stsClient.Get(sts.Name, metav1.GetOptions{})
 		if err != nil {

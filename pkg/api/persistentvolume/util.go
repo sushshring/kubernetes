@@ -22,20 +22,10 @@ import (
 	"k8s.io/kubernetes/pkg/features"
 )
 
-// DropDisabledFields removes disabled fields from the pv spec.
+// DropDisabledAlphaFields removes disabled fields from the pv spec.
 // This should be called from PrepareForCreate/PrepareForUpdate for all resources containing a pv spec.
-func DropDisabledFields(pvSpec *api.PersistentVolumeSpec, oldPVSpec *api.PersistentVolumeSpec) {
-	if !utilfeature.DefaultFeatureGate.Enabled(features.BlockVolume) && !volumeModeInUse(oldPVSpec) {
+func DropDisabledAlphaFields(pvSpec *api.PersistentVolumeSpec) {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.BlockVolume) {
 		pvSpec.VolumeMode = nil
 	}
-}
-
-func volumeModeInUse(oldPVSpec *api.PersistentVolumeSpec) bool {
-	if oldPVSpec == nil {
-		return false
-	}
-	if oldPVSpec.VolumeMode != nil {
-		return true
-	}
-	return false
 }

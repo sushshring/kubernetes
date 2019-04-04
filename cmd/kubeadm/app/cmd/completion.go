@@ -18,12 +18,12 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 
-	"github.com/lithammer/dedent"
-	"github.com/pkg/errors"
+	"github.com/golang/glog"
+	"github.com/renstrom/dedent"
 	"github.com/spf13/cobra"
-	"k8s.io/klog"
 
 	kubeadmutil "k8s.io/kubernetes/cmd/kubeadm/app/util"
 )
@@ -50,7 +50,7 @@ var (
 		The shell code must be evaluated to provide interactive
 		completion of kubeadm commands. This can be done by sourcing it from
 		the .bash_profile.
-
+		
 		Note: this requires the bash-completion framework.
 
 		To install it on Mac use homebrew:
@@ -73,7 +73,7 @@ var (
 		# Load the kubeadm completion code for bash into the current shell
 		source <(kubeadm completion bash)
 
-		# Write bash completion code to a file and source it from .bash_profile
+		# Write bash completion code to a file and source if from .bash_profile
 		kubeadm completion bash > ~/.kube/kubeadm_completion.bash.inc
 		printf "\n# Kubeadm shell completion\nsource '$HOME/.kube/kubeadm_completion.bash.inc'\n" >> $HOME/.bash_profile
 		source $HOME/.bash_profile
@@ -117,14 +117,15 @@ func NewCmdCompletion(out io.Writer, boilerPlate string) *cobra.Command {
 
 // RunCompletion checks given arguments and executes command
 func RunCompletion(out io.Writer, boilerPlate string, cmd *cobra.Command, args []string) error {
-	if length := len(args); length == 0 {
-		return errors.New("shell not specified")
-	} else if length > 1 {
-		return errors.New("too many arguments. expected only the shell type")
+	if len(args) == 0 {
+		return fmt.Errorf("shell not specified")
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("too many arguments. expected only the shell type")
 	}
 	run, found := completionShells[args[0]]
 	if !found {
-		return errors.Errorf("unsupported shell type %q", args[0])
+		return fmt.Errorf("unsupported shell type %q", args[0])
 	}
 
 	if len(boilerPlate) == 0 {
@@ -137,7 +138,7 @@ func RunCompletion(out io.Writer, boilerPlate string, cmd *cobra.Command, args [
 }
 
 func runCompletionBash(out io.Writer, kubeadm *cobra.Command) error {
-	klog.V(1).Infoln("[completion] writing completion code for Bash")
+	glog.V(1).Infoln("[completion] writing completion code for Bash")
 	return kubeadm.GenBashCompletion(out)
 }
 
@@ -283,12 +284,12 @@ __kubeadm_convert_bash_to_zsh() {
 	-e "s/\\\$(type${RWORD}/\$(__kubeadm_type/g" \
 	<<'BASH_COMPLETION_EOF'
 `
-	klog.V(1).Infoln("[completion] writing completion code for Zsh")
+	glog.V(1).Infoln("[completion] writing completion code for Zsh")
 	out.Write([]byte(zshInitialization))
 
 	buf := new(bytes.Buffer)
 	kubeadm.GenBashCompletion(buf)
-	klog.V(1).Infoln("[completion] writing completion code for Bash")
+	glog.V(1).Infoln("[completion] writing completion code for Bash")
 	out.Write(buf.Bytes())
 
 	zshTail := `

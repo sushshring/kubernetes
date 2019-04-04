@@ -1,10 +1,10 @@
 package(default_visibility = ["//visibility:public"])
 
 load(
-    "//build:go.bzl",
-    go_binary = "go_binary_conditional_pure",
+    "@io_bazel_rules_go//go:def.bzl",
+    "go_binary",
+    "go_library",
 )
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_binary(
     name = "gendocs",

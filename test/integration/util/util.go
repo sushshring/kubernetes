@@ -20,16 +20,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 
+	"github.com/golang/glog"
 	"k8s.io/api/core/v1"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	clientv1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler"
-	// import DefaultProvider
-	_ "k8s.io/kubernetes/pkg/scheduler/algorithmprovider/defaults"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	"k8s.io/kubernetes/pkg/scheduler/factory"
 	"k8s.io/kubernetes/test/integration/framework"
@@ -49,9 +49,9 @@ func StartApiserver() (string, ShutdownFunc) {
 	framework.RunAMasterUsingServer(framework.NewIntegrationTestMasterConfig(), s, h)
 
 	shutdownFunc := func() {
-		klog.Infof("destroying API server")
+		glog.Infof("destroying API server")
 		s.Close()
-		klog.Infof("destroyed API server")
+		glog.Infof("destroyed API server")
 	}
 	return s.URL, shutdownFunc
 }
@@ -66,38 +66,26 @@ func StartScheduler(clientSet clientset.Interface) (factory.Configurator, Shutdo
 	evtWatch := evtBroadcaster.StartRecordingToSink(&clientv1core.EventSinkImpl{
 		Interface: clientSet.CoreV1().Events("")})
 
-	stopCh := make(chan struct{})
-	schedulerConfigurator := createSchedulerConfigurator(clientSet, informerFactory, stopCh)
+	schedulerConfigurator := createSchedulerConfigurator(clientSet, informerFactory)
 
-	config, err := schedulerConfigurator.CreateFromConfig(schedulerapi.Policy{})
+	sched, err := scheduler.NewFromConfigurator(schedulerConfigurator, func(conf *factory.Config) {
+		conf.Recorder = evtBroadcaster.NewRecorder(legacyscheme.Scheme, v1.EventSource{Component: "scheduler"})
+	})
 	if err != nil {
-		klog.Fatalf("Error creating scheduler: %v", err)
+		glog.Fatalf("Error creating scheduler: %v", err)
 	}
-	config.Recorder = evtBroadcaster.NewRecorder(legacyscheme.Scheme, v1.EventSource{Component: "scheduler"})
 
-	sched := scheduler.NewFromConfig(config)
-	scheduler.AddAllEventHandlers(sched,
-		v1.DefaultSchedulerName,
-		informerFactory.Core().V1().Nodes(),
-		informerFactory.Core().V1().Pods(),
-		informerFactory.Core().V1().PersistentVolumes(),
-		informerFactory.Core().V1().PersistentVolumeClaims(),
-		informerFactory.Core().V1().ReplicationControllers(),
-		informerFactory.Apps().V1().ReplicaSets(),
-		informerFactory.Apps().V1().StatefulSets(),
-		informerFactory.Core().V1().Services(),
-		informerFactory.Policy().V1beta1().PodDisruptionBudgets(),
-		informerFactory.Storage().V1().StorageClasses(),
-	)
+	stop := make(chan struct{})
+	informerFactory.Start(stop)
 
-	informerFactory.Start(stopCh)
 	sched.Run()
 
 	shutdownFunc := func() {
-		klog.Infof("destroying scheduler")
+		glog.Infof("destroying scheduler")
 		evtWatch.Stop()
-		close(stopCh)
-		klog.Infof("destroyed scheduler")
+		sched.StopEverything()
+		close(stop)
+		glog.Infof("destroyed scheduler")
 	}
 	return schedulerConfigurator, shutdownFunc
 }
@@ -106,8 +94,9 @@ func StartScheduler(clientSet clientset.Interface) (factory.Configurator, Shutdo
 func createSchedulerConfigurator(
 	clientSet clientset.Interface,
 	informerFactory informers.SharedInformerFactory,
-	stopCh <-chan struct{},
 ) factory.Configurator {
+	// Enable EnableEquivalenceClassCache for all integration tests.
+	utilfeature.DefaultFeatureGate.Set("EnableEquivalenceClassCache=true")
 
 	return factory.NewConfigFactory(&factory.ConfigFactoryArgs{
 		SchedulerName:                  v1.DefaultSchedulerName,
@@ -123,8 +112,8 @@ func createSchedulerConfigurator(
 		PdbInformer:                    informerFactory.Policy().V1beta1().PodDisruptionBudgets(),
 		StorageClassInformer:           informerFactory.Storage().V1().StorageClasses(),
 		HardPodAffinitySymmetricWeight: v1.DefaultHardPodAffinitySymmetricWeight,
+		EnableEquivalenceClassCache:    utilfeature.DefaultFeatureGate.Enabled(features.EnableEquivalenceClassCache),
 		DisablePreemption:              false,
 		PercentageOfNodesToScore:       schedulerapi.DefaultPercentageOfNodesToScore,
-		StopCh:                         stopCh,
 	})
 }

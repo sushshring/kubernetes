@@ -22,11 +22,10 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/blang/semver"
-	"github.com/pkg/errors"
+	"k8s.io/apimachinery/pkg/util/errors"
 
-	errorsutil "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/klog"
+	"github.com/blang/semver"
+	"github.com/golang/glog"
 )
 
 // semVerDotsCount is the number of dots in a valid semantic version.
@@ -46,7 +45,7 @@ func newPackageManager() (packageManager, error) {
 	if m, ok := newDPKG(); ok {
 		return m, nil
 	}
-	return nil, errors.New("failed to find package manager")
+	return nil, fmt.Errorf("failed to find package manager")
 }
 
 // dpkg implements packageManager. It uses "dpkg-query" to retrieve package
@@ -65,14 +64,14 @@ func newDPKG() (packageManager, bool) {
 
 // getPackageVersion returns the upstream package version for the package given
 // the packageName, and an error if no such package exists.
-func (dpkg) getPackageVersion(packageName string) (string, error) {
+func (_ dpkg) getPackageVersion(packageName string) (string, error) {
 	output, err := exec.Command("dpkg-query", "--show", "--showformat='${Version}'", packageName).Output()
 	if err != nil {
-		return "", errors.Wrap(err, "dpkg-query failed")
+		return "", fmt.Errorf("dpkg-query failed: %s", err)
 	}
 	version := extractUpstreamVersion(string(output))
 	if version == "" {
-		return "", errors.New("no version information")
+		return "", fmt.Errorf("no version information")
 	}
 	return version, nil
 }
@@ -86,23 +85,23 @@ type packageValidator struct {
 }
 
 // Name returns the name of the package validator.
-func (validator *packageValidator) Name() string {
+func (self *packageValidator) Name() string {
 	return "package"
 }
 
 // Validate checks packages and their versions against the spec using the
 // package manager on the running machine, and returns an error on any
 // package/version mismatch.
-func (validator *packageValidator) Validate(spec SysSpec) (error, error) {
+func (self *packageValidator) Validate(spec SysSpec) (error, error) {
 	if len(spec.PackageSpecs) == 0 {
 		return nil, nil
 	}
 
 	var err error
-	if validator.kernelRelease, err = getKernelRelease(); err != nil {
+	if self.kernelRelease, err = getKernelRelease(); err != nil {
 		return nil, err
 	}
-	if validator.osDistro, err = getOSDistro(); err != nil {
+	if self.osDistro, err = getOSDistro(); err != nil {
 		return nil, err
 	}
 
@@ -110,33 +109,33 @@ func (validator *packageValidator) Validate(spec SysSpec) (error, error) {
 	if err != nil {
 		return nil, err
 	}
-	specs := applyPackageSpecOverride(spec.PackageSpecs, spec.PackageSpecOverrides, validator.osDistro)
-	return validator.validate(specs, manager)
+	specs := applyPackageSpecOverride(spec.PackageSpecs, spec.PackageSpecOverrides, self.osDistro)
+	return self.validate(specs, manager)
 }
 
 // Validate checks packages and their versions against the packageSpecs using
 // the packageManager, and returns an error on any package/version mismatch.
-func (validator *packageValidator) validate(packageSpecs []PackageSpec, manager packageManager) (error, error) {
+func (self *packageValidator) validate(packageSpecs []PackageSpec, manager packageManager) (error, error) {
 	var errs []error
 	for _, spec := range packageSpecs {
 		// Substitute variables in package name.
-		packageName := resolvePackageName(spec.Name, validator.kernelRelease)
+		packageName := resolvePackageName(spec.Name, self.kernelRelease)
 
 		nameWithVerRange := fmt.Sprintf("%s (%s)", packageName, spec.VersionRange)
 
 		// Get the version of the package on the running machine.
 		version, err := manager.getPackageVersion(packageName)
 		if err != nil {
-			klog.V(1).Infof("Failed to get the version for the package %q: %s\n", packageName, err)
+			glog.V(1).Infof("Failed to get the version for the package %q: %s\n", packageName, err)
 			errs = append(errs, err)
-			validator.reporter.Report(nameWithVerRange, "not installed", bad)
+			self.reporter.Report(nameWithVerRange, "not installed", bad)
 			continue
 		}
 
 		// Version requirement will not be enforced if version range is
 		// not specified in the spec.
 		if spec.VersionRange == "" {
-			validator.reporter.Report(packageName, version, good)
+			self.reporter.Report(packageName, version, good)
 			continue
 		}
 
@@ -145,27 +144,27 @@ func (validator *packageValidator) validate(packageSpecs []PackageSpec, manager 
 		// the version is in the range.
 		sv, err := semver.Make(toSemVer(version))
 		if err != nil {
-			klog.Errorf("Failed to convert %q to semantic version: %s\n", version, err)
+			glog.Errorf("Failed to convert %q to semantic version: %s\n", version, err)
 			errs = append(errs, err)
-			validator.reporter.Report(nameWithVerRange, "internal error", bad)
+			self.reporter.Report(nameWithVerRange, "internal error", bad)
 			continue
 		}
 		versionRange := semver.MustParseRange(toSemVerRange(spec.VersionRange))
 		if versionRange(sv) {
-			validator.reporter.Report(nameWithVerRange, version, good)
+			self.reporter.Report(nameWithVerRange, version, good)
 		} else {
-			errs = append(errs, errors.Errorf("package \"%s %s\" does not meet the spec \"%s (%s)\"", packageName, sv, packageName, spec.VersionRange))
-			validator.reporter.Report(nameWithVerRange, version, bad)
+			errs = append(errs, fmt.Errorf("package \"%s %s\" does not meet the spec \"%s (%s)\"", packageName, sv, packageName, spec.VersionRange))
+			self.reporter.Report(nameWithVerRange, version, bad)
 		}
 	}
-	return nil, errorsutil.NewAggregate(errs)
+	return nil, errors.NewAggregate(errs)
 }
 
 // getKernelRelease returns the kernel release of the local machine.
 func getKernelRelease() (string, error) {
 	output, err := exec.Command("uname", "-r").Output()
 	if err != nil {
-		return "", errors.Wrap(err, "failed to get kernel release")
+		return "", fmt.Errorf("failed to get kernel release: %s", err)
 	}
 	return strings.TrimSpace(string(output)), nil
 }
@@ -175,7 +174,7 @@ func getOSDistro() (string, error) {
 	f := "/etc/lsb-release"
 	b, err := ioutil.ReadFile(f)
 	if err != nil {
-		return "", errors.Wrapf(err, "failed to read %q", f)
+		return "", fmt.Errorf("failed to read %q: %s", f, err)
 	}
 	content := string(b)
 	switch {
@@ -186,7 +185,7 @@ func getOSDistro() (string, error) {
 	case strings.Contains(content, "CoreOS"):
 		return "coreos", nil
 	default:
-		return "", errors.Errorf("failed to get OS distro: %s", content)
+		return "", fmt.Errorf("failed to get OS distro: %s", content)
 	}
 }
 

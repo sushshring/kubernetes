@@ -25,5 +25,4 @@ import (
 
 func TestRoundTrip(t *testing.T) {
 	roundtrip.RoundTripTestForAPIGroup(t, Install, apiextensionsfuzzer.Funcs)
-	roundtrip.RoundTripProtobufTestForAPIGroup(t, Install, apiextensionsfuzzer.Funcs)
 }

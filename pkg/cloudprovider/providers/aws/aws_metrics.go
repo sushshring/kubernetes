@@ -16,11 +16,7 @@ limitations under the License.
 
 package aws
 
-import (
-	"sync"
-
-	"github.com/prometheus/client_golang/prometheus"
-)
+import "github.com/prometheus/client_golang/prometheus"
 
 var (
 	awsAPIMetric = prometheus.NewHistogramVec(
@@ -57,12 +53,8 @@ func recordAWSThrottlesMetric(operation string) {
 	awsAPIThrottlesMetric.With(prometheus.Labels{"operation_name": operation}).Inc()
 }
 
-var registerOnce sync.Once
-
 func registerMetrics() {
-	registerOnce.Do(func() {
-		prometheus.MustRegister(awsAPIMetric)
-		prometheus.MustRegister(awsAPIErrorMetric)
-		prometheus.MustRegister(awsAPIThrottlesMetric)
-	})
+	prometheus.MustRegister(awsAPIMetric)
+	prometheus.MustRegister(awsAPIErrorMetric)
+	prometheus.MustRegister(awsAPIThrottlesMetric)
 }

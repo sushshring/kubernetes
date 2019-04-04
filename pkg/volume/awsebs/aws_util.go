@@ -24,15 +24,12 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/klog"
-
+	"github.com/golang/glog"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	cloudprovider "k8s.io/cloud-provider"
-	volumehelpers "k8s.io/cloud-provider/volume/helpers"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/aws"
-	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 )
@@ -62,13 +59,13 @@ func (util *AWSDiskUtil) DeleteVolume(d *awsElasticBlockStoreDeleter) error {
 	if err != nil {
 		// AWS cloud provider returns volume.deletedVolumeInUseError when
 		// necessary, no handling needed here.
-		klog.V(2).Infof("Error deleting EBS Disk volume %s: %v", d.volumeID, err)
+		glog.V(2).Infof("Error deleting EBS Disk volume %s: %v", d.volumeID, err)
 		return err
 	}
 	if deleted {
-		klog.V(2).Infof("Successfully deleted EBS Disk volume %s", d.volumeID)
+		glog.V(2).Infof("Successfully deleted EBS Disk volume %s", d.volumeID)
 	} else {
-		klog.V(2).Infof("Successfully deleted EBS Disk volume %s (actually already deleted)", d.volumeID)
+		glog.V(2).Infof("Successfully deleted EBS Disk volume %s (actually already deleted)", d.volumeID)
 	}
 	return nil
 }
@@ -99,7 +96,7 @@ func (util *AWSDiskUtil) CreateVolume(c *awsElasticBlockStoreProvisioner, node *
 
 	volumeOptions, err := populateVolumeOptions(c.plugin.GetPluginName(), c.options.PVC.Name, capacity, tags, c.options.Parameters, node, allowedTopologies, zonesWithNodes)
 	if err != nil {
-		klog.V(2).Infof("Error populating EBS options: %v", err)
+		glog.V(2).Infof("Error populating EBS options: %v", err)
 		return "", 0, nil, "", err
 	}
 
@@ -110,22 +107,20 @@ func (util *AWSDiskUtil) CreateVolume(c *awsElasticBlockStoreProvisioner, node *
 
 	name, err := cloud.CreateDisk(volumeOptions)
 	if err != nil {
-		klog.V(2).Infof("Error creating EBS Disk volume: %v", err)
+		glog.V(2).Infof("Error creating EBS Disk volume: %v", err)
 		return "", 0, nil, "", err
 	}
-	klog.V(2).Infof("Successfully created EBS Disk volume %s", name)
+	glog.V(2).Infof("Successfully created EBS Disk volume %s", name)
 
 	labels, err := cloud.GetVolumeLabels(name)
 	if err != nil {
 		// We don't really want to leak the volume here...
-		klog.Errorf("error building labels for new EBS volume %q: %v", name, err)
+		glog.Errorf("error building labels for new EBS volume %q: %v", name, err)
 	}
 
 	fstype := ""
-	for k, v := range c.options.Parameters {
-		if strings.ToLower(k) == volume.VolumeParameterFSType {
-			fstype = v
-		}
+	if v, ok := c.options.Parameters[volume.VolumeParameterFSType]; ok {
+		fstype = v
 	}
 
 	return name, volumeOptions.CapacityGB, labels, fstype, nil
@@ -133,7 +128,7 @@ func (util *AWSDiskUtil) CreateVolume(c *awsElasticBlockStoreProvisioner, node *
 
 // returns volumeOptions for EBS based on storageclass parameters and node configuration
 func populateVolumeOptions(pluginName, pvcName string, capacityGB resource.Quantity, tags map[string]string, storageParams map[string]string, node *v1.Node, allowedTopologies []v1.TopologySelectorTerm, zonesWithNodes sets.String) (*aws.VolumeOptions, error) {
-	requestGiB, err := volumehelpers.RoundUpToGiBInt(capacityGB)
+	requestGiB, err := volumeutil.RoundUpToGiBInt(capacityGB)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +153,7 @@ func populateVolumeOptions(pluginName, pvcName string, capacityGB resource.Quant
 			zone = v
 		case "zones":
 			zonesPresent = true
-			zones, err = volumehelpers.ZonesToSet(v)
+			zones, err = volumeutil.ZonesToSet(v)
 			if err != nil {
 				return nil, fmt.Errorf("error parsing zones %s, must be strings separated by commas: %v", zones, err)
 			}
@@ -173,7 +168,7 @@ func populateVolumeOptions(pluginName, pvcName string, capacityGB resource.Quant
 				return nil, fmt.Errorf("invalid encrypted boolean value %q, must be true or false: %v", v, err)
 			}
 		case "kmskeyid":
-			volumeOptions.KmsKeyID = v
+			volumeOptions.KmsKeyId = v
 		case volume.VolumeParameterFSType:
 			// Do nothing but don't make this fail
 		default:
@@ -181,7 +176,7 @@ func populateVolumeOptions(pluginName, pvcName string, capacityGB resource.Quant
 		}
 	}
 
-	volumeOptions.AvailabilityZone, err = volumehelpers.SelectZoneForVolume(zonePresent, zonesPresent, zone, zones, zonesWithNodes, node, allowedTopologies, pvcName)
+	volumeOptions.AvailabilityZone, err = volumeutil.SelectZoneForVolume(zonePresent, zonesPresent, zone, zones, zonesWithNodes, node, allowedTopologies, pvcName)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +186,7 @@ func populateVolumeOptions(pluginName, pvcName string, capacityGB resource.Quant
 // Returns the first path that exists, or empty string if none exist.
 func verifyDevicePath(devicePaths []string) (string, error) {
 	for _, path := range devicePaths {
-		if pathExists, err := mount.PathExists(path); err != nil {
+		if pathExists, err := volumeutil.PathExists(path); err != nil {
 			return "", fmt.Errorf("Error checking if path exists: %v", err)
 		} else if pathExists {
 			return path, nil
@@ -205,7 +200,7 @@ func verifyDevicePath(devicePaths []string) (string, error) {
 func verifyAllPathsRemoved(devicePaths []string) (bool, error) {
 	allPathsRemoved := true
 	for _, path := range devicePaths {
-		exists, err := mount.PathExists(path)
+		exists, err := volumeutil.PathExists(path)
 		if err != nil {
 			return false, fmt.Errorf("Error checking if path exists: %v", err)
 		}
@@ -234,14 +229,14 @@ func getDiskByIDPaths(volumeID aws.KubernetesVolumeID, partition string, deviceP
 	// and we have to get the volume id from the nvme interface
 	awsVolumeID, err := volumeID.MapToAWSVolumeID()
 	if err != nil {
-		klog.Warningf("error mapping volume %q to AWS volume: %v", volumeID, err)
+		glog.Warningf("error mapping volume %q to AWS volume: %v", volumeID, err)
 	} else {
 		// This is the magic name on which AWS presents NVME devices under /dev/disk/by-id/
 		// For example, vol-0fab1d5e3f72a5e23 creates a symlink at /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol0fab1d5e3f72a5e23
 		nvmeName := "nvme-Amazon_Elastic_Block_Store_" + strings.Replace(string(awsVolumeID), "-", "", -1)
 		nvmePath, err := findNvmeVolume(nvmeName)
 		if err != nil {
-			klog.Warningf("error looking for nvme volume %q: %v", volumeID, err)
+			glog.Warningf("error looking for nvme volume %q: %v", volumeID, err)
 		} else if nvmePath != "" {
 			devicePaths = append(devicePaths, nvmePath)
 		}
@@ -267,14 +262,14 @@ func findNvmeVolume(findName string) (device string, err error) {
 	stat, err := os.Lstat(p)
 	if err != nil {
 		if os.IsNotExist(err) {
-			klog.V(6).Infof("nvme path not found %q", p)
+			glog.V(6).Infof("nvme path not found %q", p)
 			return "", nil
 		}
 		return "", fmt.Errorf("error getting stat of %q: %v", p, err)
 	}
 
 	if stat.Mode()&os.ModeSymlink != os.ModeSymlink {
-		klog.Warningf("nvme file %q found, but was not a symlink", p)
+		glog.Warningf("nvme file %q found, but was not a symlink", p)
 		return "", nil
 	}
 

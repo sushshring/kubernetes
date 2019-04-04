@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/session"
 	"github.com/vmware/govmomi/vim25/methods"
@@ -172,23 +173,6 @@ func (s *SessionManager) TerminateSession(ctx *Context, req *types.TerminateSess
 	return body
 }
 
-func (s *SessionManager) SessionIsActive(ctx *Context, req *types.SessionIsActive) soap.HasFault {
-	body := new(methods.SessionIsActiveBody)
-
-	if ctx.Map.IsESX() {
-		body.Fault_ = Fault("", new(types.NotImplemented))
-		return body
-	}
-
-	body.Res = new(types.SessionIsActiveResponse)
-
-	if session, exists := s.sessions[req.SessionID]; exists {
-		body.Res.Returnval = session.UserName == req.UserName
-	}
-
-	return body
-}
-
 func (s *SessionManager) AcquireCloneTicket(ctx *Context, _ *types.AcquireCloneTicket) soap.HasFault {
 	session := *ctx.Session
 	session.Key = uuid.New().String()
@@ -250,7 +234,7 @@ var invalidLogin = Fault("Login failure", new(types.InvalidLogin))
 type Context struct {
 	req *http.Request
 	res http.ResponseWriter
-	svc *Service
+	m   *SessionManager
 
 	context.Context
 	Session *Session
@@ -262,7 +246,7 @@ type Context struct {
 // mapSession maps an HTTP cookie to a Session.
 func (c *Context) mapSession() {
 	if cookie, err := c.req.Cookie(soap.SessionCookieName); err == nil {
-		if val, ok := c.svc.sm.sessions[cookie.Value]; ok {
+		if val, ok := c.m.sessions[cookie.Value]; ok {
 			c.SetSession(val, false)
 		}
 	}
@@ -274,7 +258,7 @@ func (c *Context) SetSession(session Session, login bool) {
 	session.IpAddress = strings.Split(c.req.RemoteAddr, ":")[0]
 	session.LastActiveTime = time.Now()
 
-	c.svc.sm.sessions[session.Key] = session
+	c.m.sessions[session.Key] = session
 	c.Session = &session
 
 	if login {

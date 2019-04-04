@@ -21,13 +21,15 @@ import (
 	"strconv"
 	"time"
 
-	autoscalingv1 "k8s.io/api/autoscaling/v1"
+	autoscalingapi "k8s.io/api/autoscaling/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+
 	scaleclient "k8s.io/client-go/scale"
 )
+
+// TODO: Figure out if we should be waiting on initializers in the Scale() functions below.
 
 // Scaler provides an interface for resources that can be scaled.
 type Scaler interface {
@@ -95,7 +97,7 @@ func ScaleCondition(r Scaler, precondition *ScalePrecondition, namespace, name s
 }
 
 // validateGeneric ensures that the preconditions match. Returns nil if they are valid, otherwise an error
-func (precondition *ScalePrecondition) validate(scale *autoscalingv1.Scale) error {
+func (precondition *ScalePrecondition) validate(scale *autoscalingapi.Scale) error {
 	if precondition.Size != -1 && int(scale.Spec.Replicas) != precondition.Size {
 		return PreconditionError{"replicas", strconv.Itoa(precondition.Size), strconv.Itoa(int(scale.Spec.Replicas))}
 	}
@@ -114,15 +116,11 @@ var _ Scaler = &genericScaler{}
 
 // ScaleSimple updates a scale of a given resource. It returns the resourceVersion of the scale if the update was successful.
 func (s *genericScaler) ScaleSimple(namespace, name string, preconditions *ScalePrecondition, newSize uint, gr schema.GroupResource) (updatedResourceVersion string, err error) {
-	scale := &autoscalingv1.Scale{
-		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+	scale, err := s.scaleNamespacer.Scales(namespace).Get(gr, name)
+	if err != nil {
+		return "", err
 	}
 	if preconditions != nil {
-		var err error
-		scale, err = s.scaleNamespacer.Scales(namespace).Get(gr, name)
-		if err != nil {
-			return "", err
-		}
 		if err := preconditions.validate(scale); err != nil {
 			return "", err
 		}
@@ -139,6 +137,9 @@ func (s *genericScaler) ScaleSimple(namespace, name string, preconditions *Scale
 // Scale updates a scale of a given resource to a new size, with optional precondition check (if preconditions is not nil),
 // optional retries (if retry is not nil), and then optionally waits for the status to reach desired count.
 func (s *genericScaler) Scale(namespace, resourceName string, newSize uint, preconditions *ScalePrecondition, retry, waitForReplicas *RetryParams, gr schema.GroupResource) error {
+	if preconditions == nil {
+		preconditions = &ScalePrecondition{-1, ""}
+	}
 	if retry == nil {
 		// make it try only once, immediately
 		retry = &RetryParams{Interval: time.Millisecond, Timeout: time.Millisecond}
@@ -174,7 +175,7 @@ func scaleHasDesiredReplicas(sClient scaleclient.ScalesGetter, gr schema.GroupRe
 // or returns error when timeout happens
 func WaitForScaleHasDesiredReplicas(sClient scaleclient.ScalesGetter, gr schema.GroupResource, resourceName string, namespace string, newSize uint, waitForReplicas *RetryParams) error {
 	if waitForReplicas == nil {
-		return fmt.Errorf("waitForReplicas parameter cannot be nil")
+		return fmt.Errorf("waitForReplicas parameter cannot be nil!")
 	}
 	err := wait.PollImmediate(
 		waitForReplicas.Interval,

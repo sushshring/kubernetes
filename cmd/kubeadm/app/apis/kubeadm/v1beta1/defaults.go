@@ -68,8 +68,9 @@ func addDefaultingFuncs(scheme *runtime.Scheme) error {
 // SetDefaults_InitConfiguration assigns default values for the InitConfiguration
 func SetDefaults_InitConfiguration(obj *InitConfiguration) {
 	SetDefaults_ClusterConfiguration(&obj.ClusterConfiguration)
+	SetDefaults_NodeRegistrationOptions(&obj.NodeRegistration)
 	SetDefaults_BootstrapTokens(obj)
-	SetDefaults_APIEndpoint(&obj.LocalAPIEndpoint)
+	SetDefaults_APIEndpoint(&obj.APIEndpoint)
 }
 
 // SetDefaults_ClusterConfiguration assigns default values for the ClusterConfiguration
@@ -98,28 +99,11 @@ func SetDefaults_ClusterConfiguration(obj *ClusterConfiguration) {
 		obj.ClusterName = DefaultClusterName
 	}
 
-	SetDefaults_DNS(obj)
 	SetDefaults_Etcd(obj)
-	SetDefaults_APIServer(&obj.APIServer)
+	SetDefaults_AuditPolicyConfiguration(obj)
 }
 
-// SetDefaults_APIServer assigns default values for the API Server
-func SetDefaults_APIServer(obj *APIServer) {
-	if obj.TimeoutForControlPlane == nil {
-		obj.TimeoutForControlPlane = &metav1.Duration{
-			Duration: constants.DefaultControlPlaneTimeout,
-		}
-	}
-}
-
-// SetDefaults_DNS assigns default values for the DNS component
-func SetDefaults_DNS(obj *ClusterConfiguration) {
-	if obj.DNS.Type == "" {
-		obj.DNS.Type = CoreDNS
-	}
-}
-
-// SetDefaults_Etcd assigns default values for the proxy
+// SetDefaults_Etcd assigns default values for the Proxy
 func SetDefaults_Etcd(obj *ClusterConfiguration) {
 	if obj.Etcd.External == nil && obj.Etcd.Local == nil {
 		obj.Etcd.Local = &LocalEtcd{}
@@ -136,42 +120,45 @@ func SetDefaults_JoinConfiguration(obj *JoinConfiguration) {
 	if obj.CACertPath == "" {
 		obj.CACertPath = DefaultCACertPath
 	}
-
-	SetDefaults_JoinControlPlane(obj.ControlPlane)
-	SetDefaults_Discovery(&obj.Discovery)
-}
-
-func SetDefaults_JoinControlPlane(obj *JoinControlPlane) {
-	if obj != nil {
-		SetDefaults_APIEndpoint(&obj.LocalAPIEndpoint)
+	if len(obj.TLSBootstrapToken) == 0 {
+		obj.TLSBootstrapToken = obj.Token
 	}
-}
-
-// SetDefaults_Discovery assigns default values for the discovery process
-func SetDefaults_Discovery(obj *Discovery) {
-	if len(obj.TLSBootstrapToken) == 0 && obj.BootstrapToken != nil {
-		obj.TLSBootstrapToken = obj.BootstrapToken.Token
+	if len(obj.DiscoveryToken) == 0 && len(obj.DiscoveryFile) == 0 {
+		obj.DiscoveryToken = obj.Token
 	}
-
-	if obj.Timeout == nil {
-		obj.Timeout = &metav1.Duration{
+	// Make sure file URLs become paths
+	if len(obj.DiscoveryFile) != 0 {
+		u, err := url.Parse(obj.DiscoveryFile)
+		if err == nil && u.Scheme == "file" {
+			obj.DiscoveryFile = u.Path
+		}
+	}
+	if obj.DiscoveryTimeout == nil {
+		obj.DiscoveryTimeout = &metav1.Duration{
 			Duration: DefaultDiscoveryTimeout,
 		}
 	}
+	if obj.ClusterName == "" {
+		obj.ClusterName = DefaultClusterName
+	}
 
-	if obj.File != nil {
-		SetDefaults_FileDiscovery(obj.File)
+	SetDefaults_NodeRegistrationOptions(&obj.NodeRegistration)
+	SetDefaults_APIEndpoint(&obj.APIEndpoint)
+}
+
+func SetDefaults_NodeRegistrationOptions(obj *NodeRegistrationOptions) {
+	if obj.CRISocket == "" {
+		obj.CRISocket = DefaultCRISocket
 	}
 }
 
-// SetDefaults_FileDiscovery assigns default values for file based discovery
-func SetDefaults_FileDiscovery(obj *FileDiscovery) {
-	// Make sure file URL becomes path
-	if len(obj.KubeConfigPath) != 0 {
-		u, err := url.Parse(obj.KubeConfigPath)
-		if err == nil && u.Scheme == "file" {
-			obj.KubeConfigPath = u.Path
-		}
+// SetDefaults_AuditPolicyConfiguration sets default values for the AuditPolicyConfiguration
+func SetDefaults_AuditPolicyConfiguration(obj *ClusterConfiguration) {
+	if obj.AuditPolicyConfiguration.LogDir == "" {
+		obj.AuditPolicyConfiguration.LogDir = constants.StaticPodAuditPolicyLogDir
+	}
+	if obj.AuditPolicyConfiguration.LogMaxAge == nil {
+		obj.AuditPolicyConfiguration.LogMaxAge = &DefaultAuditPolicyLogMaxAge
 	}
 }
 

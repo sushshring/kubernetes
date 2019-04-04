@@ -25,7 +25,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 
-	"github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo"
 )
 
 // SecretUpgradeTest test that a secret is available before and after
@@ -34,7 +34,6 @@ type SecretUpgradeTest struct {
 	secret *v1.Secret
 }
 
-// Name returns the tracking name of the test.
 func (SecretUpgradeTest) Name() string { return "[sig-storage] [sig-api-machinery] secret-upgrade" }
 
 // Setup creates a secret and then verifies that a pod can consume it.
@@ -53,13 +52,13 @@ func (t *SecretUpgradeTest) Setup(f *framework.Framework) {
 		},
 	}
 
-	ginkgo.By("Creating a secret")
+	By("Creating a secret")
 	var err error
 	if t.secret, err = f.ClientSet.CoreV1().Secrets(ns.Name).Create(t.secret); err != nil {
 		framework.Failf("unable to create test secret %s: %v", t.secret.Name, err)
 	}
 
-	ginkgo.By("Making sure the secret is consumable")
+	By("Making sure the secret is consumable")
 	t.testPod(f)
 }
 
@@ -67,7 +66,7 @@ func (t *SecretUpgradeTest) Setup(f *framework.Framework) {
 // pod can still consume the secret.
 func (t *SecretUpgradeTest) Test(f *framework.Framework, done <-chan struct{}, upgrade UpgradeType) {
 	<-done
-	ginkgo.By("Consuming the secret after upgrade")
+	By("Consuming the secret after upgrade")
 	t.testPod(f)
 }
 

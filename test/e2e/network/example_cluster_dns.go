@@ -43,9 +43,9 @@ const queryDnsPythonTemplate string = `
 import socket
 try:
 	socket.gethostbyname('%s')
-	print('ok')
+	print 'ok'
 except:
-	print('err')`
+	print 'err'`
 
 var _ = SIGDescribe("ClusterDns [Feature:Example]", func() {
 	f := framework.NewDefaultFramework("cluster-dns")
@@ -135,7 +135,7 @@ var _ = SIGDescribe("ClusterDns [Feature:Example]", func() {
 		_, err = framework.LookForStringInPodExec(namespaces[0].Name, podName, []string{"python", "-c", queryDns}, "ok", dnsReadyTimeout)
 		Expect(err).NotTo(HaveOccurred(), "waiting for output from pod exec")
 
-		updatedPodYaml := prepareResourceWithReplacedString(frontendPodYaml, fmt.Sprintf("dns-backend.development.svc.%s", framework.TestContext.ClusterDNSDomain), fmt.Sprintf("dns-backend.%s.svc.%s", namespaces[0].Name, framework.TestContext.ClusterDNSDomain))
+		updatedPodYaml := prepareResourceWithReplacedString(frontendPodYaml, "dns-backend.development.svc.cluster.local", fmt.Sprintf("dns-backend.%s.svc.cluster.local", namespaces[0].Name))
 
 		// create a pod in each namespace
 		for _, ns := range namespaces {

@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 const (
@@ -127,7 +127,7 @@ func (s *fileStore) Current() (*tls.Certificate, error) {
 	if pairFileExists, err := fileExists(pairFile); err != nil {
 		return nil, err
 	} else if pairFileExists {
-		klog.Infof("Loading cert/key pair from %q.", pairFile)
+		glog.Infof("Loading cert/key pair from %q.", pairFile)
 		return loadFile(pairFile)
 	}
 
@@ -140,7 +140,7 @@ func (s *fileStore) Current() (*tls.Certificate, error) {
 		return nil, err
 	}
 	if certFileExists && keyFileExists {
-		klog.Infof("Loading cert/key pair from (%q, %q).", s.certFile, s.keyFile)
+		glog.Infof("Loading cert/key pair from (%q, %q).", s.certFile, s.keyFile)
 		return loadX509KeyPair(s.certFile, s.keyFile)
 	}
 
@@ -155,7 +155,7 @@ func (s *fileStore) Current() (*tls.Certificate, error) {
 		return nil, err
 	}
 	if certFileExists && keyFileExists {
-		klog.Infof("Loading cert/key pair from (%q, %q).", c, k)
+		glog.Infof("Loading cert/key pair from (%q, %q).", c, k)
 		return loadX509KeyPair(c, k)
 	}
 

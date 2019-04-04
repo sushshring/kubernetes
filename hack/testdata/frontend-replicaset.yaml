@@ -1,18 +1,22 @@
-apiVersion: apps/v1
+apiVersion: extensions/v1beta1
 kind: ReplicaSet
 metadata:
   name: frontend
-  labels:
-    app: guestbook
-    tier: frontend
+  # these labels can be applied automatically
+  # from the labels in the pod template if not set
+  # labels:
+    # app: guestbook
+    # tier: frontend
 spec:
   # this replicas value is default
   # modify it according to your case
   replicas: 3
-  selector:
-    matchLabels:
-      app: guestbook
-      tier: frontend
+  # selector can be applied automatically
+  # from the labels in the pod template if not set
+  # selector:
+  #   matchLabels:
+  #     app: guestbook
+  #     tier: frontend
   template:
     metadata:
       labels:

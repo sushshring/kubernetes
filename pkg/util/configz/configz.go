@@ -14,29 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package configz serves ComponentConfig objects from running components.
-//
-// Each component that wants to serve its ComponentConfig creates a Config
-// object, and the program should call InstallHandler once. e.g.,
-//  func main() {
-//  	boatConfig := getBoatConfig()
-//  	planeConfig := getPlaneConfig()
-//
-//  	bcz, err := configz.New("boat")
-//  	if err != nil {
-//  		panic(err)
-//  	}
-//  	bcz.Set(boatConfig)
-//
-//  	pcz, err := configz.New("plane")
-//  	if err != nil {
-//  		panic(err)
-//  	}
-//  	pcz.Set(planeConfig)
-//
-//  	configz.InstallHandler(http.DefaultServeMux)
-//  	http.ListenAndServe(":8080", http.DefaultServeMux)
-//  }
 package configz
 
 import (
@@ -51,14 +28,10 @@ var (
 	configs      = map[string]*Config{}
 )
 
-// Config is a handle to a ComponentConfig object. Don't create these directly;
-// use New() instead.
 type Config struct {
 	val interface{}
 }
 
-// InstallHandler adds an HTTP handler on the given mux for the "/configz"
-// endpoint which serves all registered ComponentConfigs in JSON format.
 func InstallHandler(m mux) {
 	m.Handle("/configz", http.HandlerFunc(handle))
 }
@@ -67,8 +40,6 @@ type mux interface {
 	Handle(string, http.Handler)
 }
 
-// New creates a Config object with the given name. Each Config is registered
-// with this package's "/configz" handler.
 func New(name string) (*Config, error) {
 	configsGuard.Lock()
 	defer configsGuard.Unlock()
@@ -80,22 +51,18 @@ func New(name string) (*Config, error) {
 	return &newConfig, nil
 }
 
-// Delete removes the named ComponentConfig from this package's "/configz"
-// handler.
 func Delete(name string) {
 	configsGuard.Lock()
 	defer configsGuard.Unlock()
 	delete(configs, name)
 }
 
-// Set sets the ComponentConfig for this Config.
 func (v *Config) Set(val interface{}) {
 	configsGuard.Lock()
 	defer configsGuard.Unlock()
 	v.val = val
 }
 
-// MarshalJSON marshals the ComponentConfig as JSON data.
 func (v *Config) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.val)
 }

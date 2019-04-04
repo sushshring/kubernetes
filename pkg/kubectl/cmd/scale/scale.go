@@ -20,15 +20,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	"k8s.io/klog"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/printers"
-	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/cli-runtime/pkg/genericclioptions/printers"
+	"k8s.io/cli-runtime/pkg/genericclioptions/resource"
 	"k8s.io/client-go/kubernetes"
 	batchclient "k8s.io/client-go/kubernetes/typed/batch/v1"
 	"k8s.io/kubernetes/pkg/kubectl"
@@ -209,12 +209,7 @@ func (o *ScaleOptions) RunScale() error {
 		return fmt.Errorf("cannot use --resource-version with multiple resources")
 	}
 
-	// only set a precondition if the user has requested one.  A nil precondition means we can do a blind update, so
-	// we avoid a Scale GET that may or may not succeed
-	var precondition *kubectl.ScalePrecondition
-	if o.CurrentReplicas != -1 || len(o.ResourceVersion) > 0 {
-		precondition = &kubectl.ScalePrecondition{Size: o.CurrentReplicas, ResourceVersion: o.ResourceVersion}
-	}
+	precondition := &kubectl.ScalePrecondition{Size: o.CurrentReplicas, ResourceVersion: o.ResourceVersion}
 	retry := kubectl.NewRetryParams(1*time.Second, 5*time.Minute)
 
 	var waitForReplicas *kubectl.RetryParams
@@ -233,7 +228,7 @@ func (o *ScaleOptions) RunScale() error {
 			// go down the legacy jobs path.  This can be removed in 3.14  For now, contain it.
 			fmt.Fprintf(o.ErrOut, "%s scale job is DEPRECATED and will be removed in a future version.\n", o.parent)
 
-			if err := ScaleJob(info, o.clientSet.BatchV1(), uint(o.Replicas), precondition, retry, waitForReplicas); err != nil {
+			if err := ScaleJob(info, o.clientSet.Batch(), uint(o.Replicas), precondition, retry, waitForReplicas); err != nil {
 				return err
 			}
 
@@ -245,7 +240,7 @@ func (o *ScaleOptions) RunScale() error {
 
 		// if the recorder makes a change, compute and create another patch
 		if mergePatch, err := o.Recorder.MakeRecordMergePatch(info.Object); err != nil {
-			klog.V(4).Infof("error recording current command: %v", err)
+			glog.V(4).Infof("error recording current command: %v", err)
 		} else if len(mergePatch) > 0 {
 			client, err := o.unstructuredClientForMapping(mapping)
 			if err != nil {
@@ -253,7 +248,7 @@ func (o *ScaleOptions) RunScale() error {
 			}
 			helper := resource.NewHelper(client, mapping)
 			if _, err := helper.Patch(info.Namespace, info.Name, types.MergePatchType, mergePatch, nil); err != nil {
-				klog.V(4).Infof("error recording reason: %v", err)
+				glog.V(4).Infof("error recording reason: %v", err)
 			}
 		}
 

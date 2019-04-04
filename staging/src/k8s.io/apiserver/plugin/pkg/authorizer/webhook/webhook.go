@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 
 	authorization "k8s.io/api/authorization/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -39,11 +39,7 @@ var (
 	groupVersions = []schema.GroupVersion{authorization.SchemeGroupVersion}
 )
 
-const (
-	retryBackoff = 500 * time.Millisecond
-	// The maximum length of requester-controlled attributes to allow caching.
-	maxControlledAttrCacheSize = 10000
-)
+const retryBackoff = 500 * time.Millisecond
 
 // Ensure Webhook implements the authorizer.Authorizer interface.
 var _ authorizer.Authorizer = (*WebhookAuthorizer)(nil)
@@ -193,16 +189,14 @@ func (w *WebhookAuthorizer) Authorize(attr authorizer.Attributes) (decision auth
 		})
 		if err != nil {
 			// An error here indicates bad configuration or an outage. Log for debugging.
-			klog.Errorf("Failed to make webhook authorizer request: %v", err)
+			glog.Errorf("Failed to make webhook authorizer request: %v", err)
 			return w.decisionOnError, "", err
 		}
 		r.Status = result.Status
-		if shouldCache(attr) {
-			if r.Status.Allowed {
-				w.responseCache.Add(string(key), r.Status, w.authorizedTTL)
-			} else {
-				w.responseCache.Add(string(key), r.Status, w.unauthorizedTTL)
-			}
+		if r.Status.Allowed {
+			w.responseCache.Add(string(key), r.Status, w.authorizedTTL)
+		} else {
+			w.responseCache.Add(string(key), r.Status, w.unauthorizedTTL)
 		}
 	}
 	switch {
@@ -267,18 +261,4 @@ func (t *subjectAccessReviewClient) Create(subjectAccessReview *authorization.Su
 	result := &authorization.SubjectAccessReview{}
 	err := t.w.RestClient.Post().Body(subjectAccessReview).Do().Into(result)
 	return result, err
-}
-
-// shouldCache determines whether it is safe to cache the given request attributes. If the
-// requester-controlled attributes are too large, this may be a DoS attempt, so we skip the cache.
-func shouldCache(attr authorizer.Attributes) bool {
-	controlledAttrSize := int64(len(attr.GetNamespace())) +
-		int64(len(attr.GetVerb())) +
-		int64(len(attr.GetAPIGroup())) +
-		int64(len(attr.GetAPIVersion())) +
-		int64(len(attr.GetResource())) +
-		int64(len(attr.GetSubresource())) +
-		int64(len(attr.GetName())) +
-		int64(len(attr.GetPath()))
-	return controlledAttrSize < maxControlledAttrCacheSize
 }

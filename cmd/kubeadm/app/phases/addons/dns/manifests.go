@@ -22,7 +22,7 @@ const (
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .DeploymentName }}
+  name: kube-dns
   namespace: kube-system
   labels:
     k8s-app: kube-dns
@@ -43,7 +43,6 @@ spec:
       labels:
         k8s-app: kube-dns
     spec:
-      priorityClassName: system-cluster-critical
       volumes:
       - name: kube-dns-config
         configMap:
@@ -51,7 +50,7 @@ spec:
           optional: true
       containers:
       - name: kubedns
-        image: {{ .KubeDNSImage }}
+        image: {{ .ImageRepository }}/k8s-dns-kube-dns:{{ .Version }}
         imagePullPolicy: IfNotPresent
         resources:
           # TODO: Set memory limits when we've profiled the container for large
@@ -77,7 +76,7 @@ spec:
             path: /readiness
             port: 8081
             scheme: HTTP
-          # we poll on pod startup for the Kubernetes control-plane service and
+          # we poll on pod startup for the Kubernetes master service and
           # only setup the /readiness HTTP server once that's available.
           initialDelaySeconds: 3
           timeoutSeconds: 5
@@ -103,7 +102,7 @@ spec:
         - name: kube-dns-config
           mountPath: /kube-dns-config
       - name: dnsmasq
-        image: {{ .DNSMasqImage }}
+        image: {{ .ImageRepository }}/k8s-dns-dnsmasq-nanny:{{ .Version }}
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
@@ -144,7 +143,7 @@ spec:
         - name: kube-dns-config
           mountPath: /etc/k8s/dns/dnsmasq-nanny
       - name: sidecar
-        image: {{ .SidecarImage }}
+        image: {{ .ImageRepository }}/k8s-dns-sidecar:{{ .Version }}
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
@@ -173,7 +172,7 @@ spec:
       tolerations:
       - key: CriticalAddonsOnly
         operator: Exists
-      - key: {{ .ControlPlaneTaintKey }}
+      - key: {{ .MasterTaintKey }}
         effect: NoSchedule
 `
 
@@ -205,10 +204,6 @@ spec:
     port: 53
     protocol: TCP
     targetPort: 53
-  - name: metrics
-    port: 9153
-    protocol: TCP
-    targetPort: 9153
   selector:
     k8s-app: kube-dns
 `
@@ -218,7 +213,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .DeploymentName }}
+  name: coredns
   namespace: kube-system
   labels:
     k8s-app: kube-dns
@@ -236,18 +231,15 @@ spec:
       labels:
         k8s-app: kube-dns
     spec:
-      priorityClassName: system-cluster-critical
       serviceAccountName: coredns
       tolerations:
       - key: CriticalAddonsOnly
         operator: Exists
-      - key: {{ .ControlPlaneTaintKey }}
+      - key: {{ .MasterTaintKey }}
         effect: NoSchedule
-      nodeSelector:
-        beta.kubernetes.io/os: linux
       containers:
       - name: coredns
-        image: {{ .Image }}
+        image: {{ .ImageRepository }}/coredns:{{ .Version }}
         imagePullPolicy: IfNotPresent
         resources:
           limits:
@@ -279,11 +271,6 @@ spec:
           timeoutSeconds: 5
           successThreshold: 1
           failureThreshold: 5
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-            scheme: HTTP
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -320,7 +307,7 @@ data:
            fallthrough in-addr.arpa ip6.arpa
         }{{ .Federation }}
         prometheus :9153
-        forward . {{ .UpstreamNameserver }}
+        proxy . {{ .UpstreamNameserver }}
         cache 30
         loop
         reload
@@ -344,12 +331,6 @@ rules:
   verbs:
   - list
   - watch
-- apiGroups:
-  - ""
-  resources:
-  - nodes
-  verbs:
-  - get
 `
 	// CoreDNSClusterRoleBinding is the CoreDNS Clusterrolebinding manifest
 	CoreDNSClusterRoleBinding = `

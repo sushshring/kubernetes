@@ -91,7 +91,7 @@ var _ = Describe("[sig-storage] GCP Volumes", func() {
 			}
 
 			// Must match content of test/images/volumes-tester/nfs/index.html
-			framework.TestVolumeClient(c, config, nil, "" /* fsType */, tests)
+			framework.TestVolumeClient(c, config, nil, tests)
 		})
 	})
 
@@ -114,7 +114,7 @@ var _ = Describe("[sig-storage] GCP Volumes", func() {
 				},
 			}
 			// Must match content of test/images/volume-tester/nfs/index.html
-			framework.TestVolumeClient(c, config, nil, "" /* fsType */, tests)
+			framework.TestVolumeClient(c, config, nil, tests)
 		})
 	})
 
@@ -147,7 +147,7 @@ var _ = Describe("[sig-storage] GCP Volumes", func() {
 					ExpectedContent: "Hello from GlusterFS!",
 				},
 			}
-			framework.TestVolumeClient(c, config, nil, "" /* fsType */, tests)
+			framework.TestVolumeClient(c, config, nil, tests)
 		})
 	})
 })

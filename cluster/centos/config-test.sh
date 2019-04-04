@@ -15,5 +15,5 @@
 # limitations under the License.
 
 ## for CentOS/Fedora/RHEL cluster in test mode
-KUBE_ROOT=$(dirname "${BASH_SOURCE[0]}")/../..
+KUBE_ROOT=$(dirname "${BASH_SOURCE}")/../..
 source "${KUBE_ROOT}/cluster/centos/config-default.sh"

@@ -40,6 +40,10 @@ func NewREST(optsGetter generic.RESTOptionsGetter, ttl uint64) *REST {
 		panic(err) // TODO: Propagate error up
 	}
 
+	// We explicitly do NOT do any decoration here - switching on Cacher
+	// for events will lead to too high memory consumption.
+	opts.Decorator = generic.UndecoratedStorage // TODO use watchCacheSize=-1 to signal UndecoratedStorage
+
 	store := &genericregistry.Store{
 		NewFunc:       func() runtime.Object { return &api.Event{} },
 		NewListFunc:   func() runtime.Object { return &api.EventList{} },

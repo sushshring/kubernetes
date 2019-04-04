@@ -24,12 +24,12 @@ import (
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
-	cloudvolume "k8s.io/cloud-provider/volume"
 	"k8s.io/kubernetes/pkg/volume"
 	volumetest "k8s.io/kubernetes/pkg/volume/testing"
 
+	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog"
+	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 	"strings"
 )
 
@@ -284,9 +284,9 @@ func createPVSpec(name string, readOnly bool, zones []string) *volume.Spec {
 	}
 
 	if zones != nil {
-		zonesLabel := strings.Join(zones, cloudvolume.LabelMultiZoneDelimiter)
+		zonesLabel := strings.Join(zones, kubeletapis.LabelMultiZoneDelimiter)
 		spec.PersistentVolume.ObjectMeta.Labels = map[string]string{
-			v1.LabelZoneFailureDomain: zonesLabel,
+			kubeletapis.LabelZoneFailureDomain: zonesLabel,
 		}
 	}
 
@@ -346,7 +346,7 @@ func (testcase *testcase) AttachDisk(diskName string, nodeName types.NodeName, r
 		return errors.New("Unexpected AttachDisk call: wrong regional")
 	}
 
-	klog.V(4).Infof("AttachDisk call: %s, %s, %v, returning %v", diskName, nodeName, readOnly, expected.ret)
+	glog.V(4).Infof("AttachDisk call: %s, %s, %v, returning %v", diskName, nodeName, readOnly, expected.ret)
 
 	return expected.ret
 }
@@ -371,7 +371,7 @@ func (testcase *testcase) DetachDisk(devicePath string, nodeName types.NodeName)
 		return errors.New("Unexpected DetachDisk call: wrong nodeName")
 	}
 
-	klog.V(4).Infof("DetachDisk call: %s, %s, returning %v", devicePath, nodeName, expected.ret)
+	glog.V(4).Infof("DetachDisk call: %s, %s, returning %v", devicePath, nodeName, expected.ret)
 
 	return expected.ret
 }
@@ -396,7 +396,7 @@ func (testcase *testcase) DiskIsAttached(diskName string, nodeName types.NodeNam
 		return false, errors.New("Unexpected DiskIsAttached call: wrong nodeName")
 	}
 
-	klog.V(4).Infof("DiskIsAttached call: %s, %s, returning %v, %v", diskName, nodeName, expected.isAttached, expected.ret)
+	glog.V(4).Infof("DiskIsAttached call: %s, %s, returning %v, %v", diskName, nodeName, expected.isAttached, expected.ret)
 
 	return expected.isAttached, expected.ret
 }

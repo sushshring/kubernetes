@@ -39,7 +39,7 @@ import (
 )
 
 var (
-	execExample = templates.Examples(i18n.T(`
+	exec_example = templates.Examples(i18n.T(`
 		# Get output from running 'date' from pod 123456-7890, using the first container by default
 		kubectl exec 123456-7890 date
 
@@ -76,7 +76,7 @@ func NewCmdExec(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra.C
 		DisableFlagsInUseLine: true,
 		Short:                 i18n.T("Execute a command in a container"),
 		Long:                  "Execute a command in a container.",
-		Example:               execExample,
+		Example:               exec_example,
 		Run: func(cmd *cobra.Command, args []string) {
 			argsLenAtDash := cmd.ArgsLenAtDash()
 			cmdutil.CheckErr(options.Complete(f, cmd, args, argsLenAtDash))
@@ -311,7 +311,8 @@ func (p *ExecOptions) Run() error {
 			Resource("pods").
 			Name(pod.Name).
 			Namespace(pod.Namespace).
-			SubResource("exec")
+			SubResource("exec").
+			Param("container", containerName)
 		req.VersionedParams(&corev1.PodExecOptions{
 			Container: containerName,
 			Command:   p.Command,

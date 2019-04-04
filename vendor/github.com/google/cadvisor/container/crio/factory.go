@@ -26,7 +26,7 @@ import (
 	info "github.com/google/cadvisor/info/v1"
 	"github.com/google/cadvisor/manager/watcher"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 // The namespace under which crio aliases are unique.
@@ -149,12 +149,12 @@ func Register(factory info.MachineInfoFactory, fsInfo fs.FsInfo, includedMetrics
 
 	// TODO determine crio version so we can work differently w/ future versions if needed
 
-	cgroupSubsystems, err := libcontainer.GetCgroupSubsystems(includedMetrics)
+	cgroupSubsystems, err := libcontainer.GetCgroupSubsystems()
 	if err != nil {
 		return fmt.Errorf("failed to get cgroup subsystems: %v", err)
 	}
 
-	klog.V(1).Infof("Registering CRI-O factory")
+	glog.V(1).Infof("Registering CRI-O factory")
 	f := &crioFactory{
 		client:             client,
 		cgroupSubsystems:   cgroupSubsystems,

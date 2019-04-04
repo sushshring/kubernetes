@@ -35,7 +35,7 @@ import (
 	utilexec "k8s.io/utils/exec"
 	utilpointer "k8s.io/utils/pointer"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 type HollowProxy struct {
@@ -133,6 +133,6 @@ func NewHollowProxyOrDie(
 
 func (hp *HollowProxy) Run() {
 	if err := hp.ProxyServer.Run(); err != nil {
-		klog.Fatalf("Error while running proxy: %v\n", err)
+		glog.Fatalf("Error while running proxy: %v\n", err)
 	}
 }

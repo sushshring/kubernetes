@@ -14,24 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package framework contains provider-independent helper code for
-// building and running E2E tests with Ginkgo. The actual Ginkgo test
-// suites gets assembled by combining this framework, the optional
-// provider support code and specific tests via a separate .go file
-// like Kubernetes' test/e2e.go.
 package framework
 
 import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"math/rand"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"k8s.io/api/core/v1"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -39,14 +34,19 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/discovery"
-	cacheddiscovery "k8s.io/client-go/discovery/cached/memory"
+	cacheddiscovery "k8s.io/client-go/discovery/cached"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	scaleclient "k8s.io/client-go/scale"
+	"k8s.io/client-go/tools/clientcmd"
+	csi "k8s.io/csi-api/pkg/client/clientset/versioned"
 	aggregatorclient "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+	"k8s.io/kubernetes/pkg/kubemark"
 	"k8s.io/kubernetes/test/e2e/framework/metrics"
 	testutils "k8s.io/kubernetes/test/utils"
 
@@ -66,16 +66,14 @@ const (
 type Framework struct {
 	BaseName string
 
-	// Set together with creating the ClientSet and the namespace.
-	// Guaranteed to be unique in the cluster even when running the same
-	// test multiple times in parallel.
-	UniqueName string
-
 	ClientSet                        clientset.Interface
 	KubemarkExternalClusterClientSet clientset.Interface
+	APIExtensionsClientSet           apiextensionsclient.Interface
+	CSIClientSet                     csi.Interface
 
-	AggregatorClient *aggregatorclient.Clientset
-	DynamicClient    dynamic.Interface
+	InternalClientset *internalclientset.Clientset
+	AggregatorClient  *aggregatorclient.Clientset
+	DynamicClient     dynamic.Interface
 
 	ScalesGetter scaleclient.ScalesGetter
 
@@ -110,8 +108,10 @@ type Framework struct {
 	// or stdout if ReportDir is not set once test ends.
 	TestSummaries []TestDataSummary
 
+	kubemarkControllerCloseChannel chan struct{}
+
 	// Place to keep ClusterAutoscaler metrics from before test in order to compute delta.
-	clusterAutoscalerMetricsBeforeTest metrics.Collection
+	clusterAutoscalerMetricsBeforeTest metrics.MetricsCollection
 }
 
 type TestDataSummary interface {
@@ -167,7 +167,7 @@ func (f *Framework) BeforeEach() {
 				componentTexts)
 		}
 
-		ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 		config.QPS = f.Options.ClientQPS
 		config.Burst = f.Options.ClientBurst
 		if f.Options.GroupVersion != nil {
@@ -177,15 +177,20 @@ func (f *Framework) BeforeEach() {
 			config.ContentType = TestContext.KubeAPIContentType
 		}
 		f.ClientSet, err = clientset.NewForConfig(config)
-		ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
+		f.APIExtensionsClientSet, err = apiextensionsclient.NewForConfig(config)
+		Expect(err).NotTo(HaveOccurred())
+		f.InternalClientset, err = internalclientset.NewForConfig(config)
+		Expect(err).NotTo(HaveOccurred())
 		f.AggregatorClient, err = aggregatorclient.NewForConfig(config)
-		ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 		f.DynamicClient, err = dynamic.NewForConfig(config)
-		ExpectNoError(err)
-		// node.k8s.io is based on CRD, which is served only as JSON
+		Expect(err).NotTo(HaveOccurred())
+		// csi.storage.k8s.io is based on CRD, which is served only as JSON
 		jsonConfig := config
 		jsonConfig.ContentType = "application/json"
-		ExpectNoError(err)
+		f.CSIClientSet, err = csi.NewForConfig(jsonConfig)
+		Expect(err).NotTo(HaveOccurred())
 
 		// create scales getter, set GroupVersion and NegotiatedSerializer to default values
 		// as they are required when creating a REST client.
@@ -193,19 +198,37 @@ func (f *Framework) BeforeEach() {
 			config.GroupVersion = &schema.GroupVersion{}
 		}
 		if config.NegotiatedSerializer == nil {
-			config.NegotiatedSerializer = scheme.Codecs
+			config.NegotiatedSerializer = legacyscheme.Codecs
 		}
 		restClient, err := rest.RESTClientFor(config)
-		ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 		discoClient, err := discovery.NewDiscoveryClientForConfig(config)
-		ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 		cachedDiscoClient := cacheddiscovery.NewMemCacheClient(discoClient)
 		restMapper := restmapper.NewDeferredDiscoveryRESTMapper(cachedDiscoClient)
 		restMapper.Reset()
 		resolver := scaleclient.NewDiscoveryScaleKindResolver(cachedDiscoClient)
 		f.ScalesGetter = scaleclient.New(restClient, restMapper, dynamic.LegacyAPIPathResolverFunc, resolver)
 
-		TestContext.CloudConfig.Provider.FrameworkBeforeEach(f)
+		if ProviderIs("kubemark") && TestContext.KubemarkExternalKubeConfig != "" && TestContext.CloudConfig.KubemarkController == nil {
+			externalConfig, err := clientcmd.BuildConfigFromFlags("", TestContext.KubemarkExternalKubeConfig)
+			externalConfig.QPS = f.Options.ClientQPS
+			externalConfig.Burst = f.Options.ClientBurst
+			Expect(err).NotTo(HaveOccurred())
+			externalClient, err := clientset.NewForConfig(externalConfig)
+			Expect(err).NotTo(HaveOccurred())
+			f.KubemarkExternalClusterClientSet = externalClient
+			f.kubemarkControllerCloseChannel = make(chan struct{})
+			externalInformerFactory := informers.NewSharedInformerFactory(externalClient, 0)
+			kubemarkInformerFactory := informers.NewSharedInformerFactory(f.ClientSet, 0)
+			kubemarkNodeInformer := kubemarkInformerFactory.Core().V1().Nodes()
+			go kubemarkNodeInformer.Informer().Run(f.kubemarkControllerCloseChannel)
+			TestContext.CloudConfig.KubemarkController, err = kubemark.NewKubemarkController(f.KubemarkExternalClusterClientSet, externalInformerFactory, f.ClientSet, kubemarkNodeInformer)
+			Expect(err).NotTo(HaveOccurred())
+			externalInformerFactory.Start(f.kubemarkControllerCloseChannel)
+			Expect(TestContext.CloudConfig.KubemarkController.WaitForCacheSync(f.kubemarkControllerCloseChannel)).To(BeTrue())
+			go TestContext.CloudConfig.KubemarkController.Run(f.kubemarkControllerCloseChannel)
+		}
 	}
 
 	if !f.SkipNamespaceCreation {
@@ -213,21 +236,17 @@ func (f *Framework) BeforeEach() {
 		namespace, err := f.CreateNamespace(f.BaseName, map[string]string{
 			"e2e-framework": f.BaseName,
 		})
-		ExpectNoError(err)
+		Expect(err).NotTo(HaveOccurred())
 
 		f.Namespace = namespace
 
 		if TestContext.VerifyServiceAccount {
 			By("Waiting for a default service account to be provisioned in namespace")
 			err = WaitForDefaultServiceAccountInNamespace(f.ClientSet, namespace.Name)
-			ExpectNoError(err)
+			Expect(err).NotTo(HaveOccurred())
 		} else {
 			Logf("Skipping waiting for service account")
 		}
-		f.UniqueName = f.Namespace.GetName()
-	} else {
-		// not guaranteed to be unique, but very likely
-		f.UniqueName = fmt.Sprintf("%s-%08x", f.BaseName, rand.Int31())
 	}
 
 	if TestContext.GatherKubeSystemResourceUsageData != "false" && TestContext.GatherKubeSystemResourceUsageData != "none" {
@@ -374,7 +393,9 @@ func (f *Framework) AfterEach() {
 		}
 	}
 
-	TestContext.CloudConfig.Provider.FrameworkAfterEach(f)
+	if TestContext.CloudConfig.KubemarkController != nil {
+		close(f.kubemarkControllerCloseChannel)
+	}
 
 	// Report any flakes that were observed in the e2e test and reset.
 	if f.flakeReport != nil && f.flakeReport.GetFlakeCount() > 0 {
@@ -403,7 +424,7 @@ func (f *Framework) CreateNamespace(baseName string, labels map[string]string) (
 	f.AddNamespacesToDelete(ns)
 
 	if err == nil && !f.SkipPrivilegedPSPBinding {
-		createPrivilegedPSPBinding(f, ns.Name)
+		CreatePrivilegedPSPBinding(f, ns.Name)
 	}
 
 	return ns, err
@@ -700,7 +721,7 @@ type PodStateVerification struct {
 
 	// Optional: only pods passing this function will pass the filter
 	// Verify a pod.
-	// As an optimization, in addition to specifying filter (boolean),
+	// As an optimization, in addition to specfying filter (boolean),
 	// this function allows specifying an error as well.
 	// The error indicates that the polling of the pod spectrum should stop.
 	Verify func(v1.Pod) (bool, error)
@@ -840,7 +861,7 @@ func (cl *ClusterVerification) WaitForOrFail(atLeast int, timeout time.Duration)
 	}
 }
 
-// ForEach runs a function against every verifiable pod.  Be warned that this doesn't wait for "n" pods to verify,
+// ForEach runs a function against every verifiable pod.  Be warned that this doesn't wait for "n" pods to verifiy,
 // so it may return very quickly if you have strict pod state requirements.
 //
 // For example, if you require at least 5 pods to be running before your test will pass,

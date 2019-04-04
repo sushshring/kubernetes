@@ -17,6 +17,7 @@ limitations under the License.
 package priorities
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -24,10 +25,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	utilfeaturetesting "k8s.io/apiserver/pkg/util/feature/testing"
 	"k8s.io/kubernetes/pkg/features"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
-	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
+	schedulercache "k8s.io/kubernetes/pkg/scheduler/cache"
 )
 
 // getExistingVolumeCountForNode gets the current number of volumes on node.
@@ -44,7 +44,7 @@ func getExistingVolumeCountForNode(pods []*v1.Pod, maxVolumes int) int {
 
 func TestBalancedResourceAllocation(t *testing.T) {
 	// Enable volumesOnNodeForBalancing to do balanced resource allocation
-	defer utilfeaturetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.BalanceAttachedNodeVolumes, true)()
+	utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%s=true", features.BalanceAttachedNodeVolumes))
 	podwithVol1 := v1.PodSpec{
 		Containers: []v1.Container{
 			{
@@ -401,7 +401,7 @@ func TestBalancedResourceAllocation(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			nodeNameToInfo := schedulernodeinfo.CreateNodeNameToInfoMap(test.pods, test.nodes)
+			nodeNameToInfo := schedulercache.CreateNodeNameToInfoMap(test.pods, test.nodes)
 			if len(test.pod.Spec.Volumes) > 0 {
 				maxVolumes := 5
 				for _, info := range nodeNameToInfo {

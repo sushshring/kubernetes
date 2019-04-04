@@ -8,10 +8,7 @@ load(
 
 go_library(
     name = "go_default_library",
-    srcs = [
-        "volume_manager.go",
-        "volume_manager_fake.go",
-    ],
+    srcs = ["volume_manager.go"],
     importpath = "k8s.io/kubernetes/pkg/kubelet/volumemanager",
     deps = [
         "//pkg/kubelet/config:go_default_library",
@@ -36,7 +33,7 @@ go_library(
         "//staging/src/k8s.io/apimachinery/pkg/util/wait:go_default_library",
         "//staging/src/k8s.io/client-go/kubernetes:go_default_library",
         "//staging/src/k8s.io/client-go/tools/record:go_default_library",
-        "//vendor/k8s.io/klog:go_default_library",
+        "//vendor/github.com/golang/glog:go_default_library",
     ],
 )
 

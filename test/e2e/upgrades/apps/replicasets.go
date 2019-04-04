@@ -26,7 +26,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/upgrades"
 
-	"github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
@@ -45,21 +45,19 @@ type ReplicaSetUpgradeTest struct {
 	UID types.UID
 }
 
-// Name returns the tracking name of the test.
 func (ReplicaSetUpgradeTest) Name() string { return "[sig-apps] replicaset-upgrade" }
 
-// Setup creates a ReplicaSet and makes sure it's replicas ready.
 func (r *ReplicaSetUpgradeTest) Setup(f *framework.Framework) {
 	c := f.ClientSet
 	ns := f.Namespace.Name
 	nginxImage := imageutils.GetE2EImage(imageutils.Nginx)
 
-	ginkgo.By(fmt.Sprintf("Creating replicaset %s in namespace %s", rsName, ns))
+	By(fmt.Sprintf("Creating replicaset %s in namespace %s", rsName, ns))
 	replicaSet := framework.NewReplicaSet(rsName, ns, 1, map[string]string{"test": "upgrade"}, "nginx", nginxImage)
 	rs, err := c.AppsV1().ReplicaSets(ns).Create(replicaSet)
 	framework.ExpectNoError(err)
 
-	ginkgo.By(fmt.Sprintf("Waiting for replicaset %s to have all of its replicas ready", rsName))
+	By(fmt.Sprintf("Waiting for replicaset %s to have all of its replicas ready", rsName))
 	framework.ExpectNoError(framework.WaitForReadyReplicaSet(c, ns, rsName))
 
 	r.UID = rs.UID
@@ -72,28 +70,28 @@ func (r *ReplicaSetUpgradeTest) Test(f *framework.Framework, done <-chan struct{
 	rsClient := c.AppsV1().ReplicaSets(ns)
 
 	// Block until upgrade is done
-	ginkgo.By(fmt.Sprintf("Waiting for upgrade to finish before checking replicaset %s", rsName))
+	By(fmt.Sprintf("Waiting for upgrade to finish before checking replicaset %s", rsName))
 	<-done
 
 	// Verify the RS is the same (survives) after the upgrade
-	ginkgo.By(fmt.Sprintf("Checking UID to verify replicaset %s survives upgrade", rsName))
+	By(fmt.Sprintf("Checking UID to verify replicaset %s survives upgrade", rsName))
 	upgradedRS, err := rsClient.Get(rsName, metav1.GetOptions{})
 	framework.ExpectNoError(err)
 	if upgradedRS.UID != r.UID {
 		framework.ExpectNoError(fmt.Errorf("expected same replicaset UID: %v got: %v", r.UID, upgradedRS.UID))
 	}
 
-	ginkgo.By(fmt.Sprintf("Waiting for replicaset %s to have all of its replicas ready after upgrade", rsName))
+	By(fmt.Sprintf("Waiting for replicaset %s to have all of its replicas ready after upgrade", rsName))
 	framework.ExpectNoError(framework.WaitForReadyReplicaSet(c, ns, rsName))
 
 	// Verify the upgraded RS is active by scaling up the RS to scaleNum and ensuring all pods are Ready
-	ginkgo.By(fmt.Sprintf("Scaling up replicaset %s to %d", rsName, scaleNum))
+	By(fmt.Sprintf("Scaling up replicaset %s to %d", rsName, scaleNum))
 	_, err = framework.UpdateReplicaSetWithRetries(c, ns, rsName, func(rs *apps.ReplicaSet) {
 		*rs.Spec.Replicas = scaleNum
 	})
 	framework.ExpectNoError(err)
 
-	ginkgo.By(fmt.Sprintf("Waiting for replicaset %s to have all of its replicas ready after scaling", rsName))
+	By(fmt.Sprintf("Waiting for replicaset %s to have all of its replicas ready after scaling", rsName))
 	framework.ExpectNoError(framework.WaitForReadyReplicaSet(c, ns, rsName))
 }
 

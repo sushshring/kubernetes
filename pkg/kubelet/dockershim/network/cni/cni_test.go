@@ -121,14 +121,16 @@ func tearDownPlugin(tmpDir string) {
 type fakeNetworkHost struct {
 	networktest.FakePortMappingGetter
 	kubeClient clientset.Interface
-	pods       []*containertest.FakePod
+	runtime    kubecontainer.Runtime
 }
 
 func NewFakeHost(kubeClient clientset.Interface, pods []*containertest.FakePod, ports map[string][]*hostport.PortMapping) *fakeNetworkHost {
 	host := &fakeNetworkHost{
 		networktest.FakePortMappingGetter{PortMaps: ports},
 		kubeClient,
-		pods,
+		&containertest.FakeRuntime{
+			AllPodList: pods,
+		},
 	}
 	return host
 }
@@ -141,15 +143,12 @@ func (fnh *fakeNetworkHost) GetKubeClient() clientset.Interface {
 	return fnh.kubeClient
 }
 
+func (fnh *fakeNetworkHost) GetRuntime() kubecontainer.Runtime {
+	return fnh.runtime
+}
+
 func (fnh *fakeNetworkHost) GetNetNS(containerID string) (string, error) {
-	for _, fp := range fnh.pods {
-		for _, c := range fp.Pod.Containers {
-			if c.ID.ID == containerID {
-				return fp.NetnsPath, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("container %q not found", containerID)
+	return fnh.GetRuntime().GetNetNS(kubecontainer.ContainerID{Type: "test", ID: containerID})
 }
 
 func (fnh *fakeNetworkHost) SupportsLegacyFeatures() bool {
@@ -255,7 +254,7 @@ func TestCNIPlugin(t *testing.T) {
 	bandwidthAnnotation["kubernetes.io/egress-bandwidth"] = "1M"
 
 	// Set up the pod
-	err = plug.SetUpPod("podNamespace", "podName", containerID, bandwidthAnnotation, nil)
+	err = plug.SetUpPod("podNamespace", "podName", containerID, bandwidthAnnotation)
 	if err != nil {
 		t.Errorf("Expected nil: %v", err)
 	}
@@ -292,7 +291,6 @@ func TestCNIPlugin(t *testing.T) {
 	}
 	expectedBandwidth := map[string]interface{}{
 		"ingressRate": 1000.0, "egressRate": 1000.0,
-		"ingressBurst": 2147483647.0, "egressBurst": 2147483647.0,
 	}
 	if !reflect.DeepEqual(inputConfig.RuntimeConfig.Bandwidth, expectedBandwidth) {
 		t.Errorf("mismatch in expected bandwidth. expected %v got %v", expectedBandwidth, inputConfig.RuntimeConfig.Bandwidth)

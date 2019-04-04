@@ -23,8 +23,8 @@ import (
 	"k8s.io/kubernetes/pkg/kubectl/polymorphichelpers"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/printers"
-	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/cli-runtime/pkg/genericclioptions/printers"
+	"k8s.io/cli-runtime/pkg/genericclioptions/resource"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/scheme"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
@@ -50,10 +50,10 @@ type UndoOptions struct {
 }
 
 var (
-	undoLong = templates.LongDesc(`
+	undo_long = templates.LongDesc(`
 		Rollback to a previous rollout.`)
 
-	undoExample = templates.Examples(`
+	undo_example = templates.Examples(`
 		# Rollback to the previous deployment
 		kubectl rollout undo deployment/abc
 
@@ -64,7 +64,6 @@ var (
 		kubectl rollout undo --dry-run=true deployment/abc`)
 )
 
-// NewRolloutUndoOptions returns an initialized UndoOptions instance
 func NewRolloutUndoOptions(streams genericclioptions.IOStreams) *UndoOptions {
 	return &UndoOptions{
 		PrintFlags: genericclioptions.NewPrintFlags("rolled back").WithTypeSetter(scheme.Scheme),
@@ -73,7 +72,6 @@ func NewRolloutUndoOptions(streams genericclioptions.IOStreams) *UndoOptions {
 	}
 }
 
-// NewCmdRolloutUndo returns a Command instance for the 'rollout undo' sub command
 func NewCmdRolloutUndo(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra.Command {
 	o := NewRolloutUndoOptions(streams)
 
@@ -83,8 +81,8 @@ func NewCmdRolloutUndo(f cmdutil.Factory, streams genericclioptions.IOStreams) *
 		Use:                   "undo (TYPE NAME | TYPE/NAME) [flags]",
 		DisableFlagsInUseLine: true,
 		Short:                 i18n.T("Undo a previous rollout"),
-		Long:                  undoLong,
-		Example:               undoExample,
+		Long:                  undo_long,
+		Example:               undo_example,
 		Run: func(cmd *cobra.Command, args []string) {
 			cmdutil.CheckErr(o.Complete(f, cmd, args))
 			cmdutil.CheckErr(o.Validate())
@@ -101,7 +99,6 @@ func NewCmdRolloutUndo(f cmdutil.Factory, streams genericclioptions.IOStreams) *
 	return cmd
 }
 
-// Complete completes al the required options
 func (o *UndoOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []string) error {
 	o.Resources = args
 	o.DryRun = cmdutil.GetDryRunFlag(cmd)
@@ -126,13 +123,12 @@ func (o *UndoOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []str
 }
 
 func (o *UndoOptions) Validate() error {
-	if len(o.Resources) == 0 && cmdutil.IsFilenameSliceEmpty(o.Filenames, o.Kustomize) {
+	if len(o.Resources) == 0 && cmdutil.IsFilenameSliceEmpty(o.Filenames) {
 		return fmt.Errorf("required resource not specified")
 	}
 	return nil
 }
 
-// RunUndo performs the execution of 'rollout undo' sub command
 func (o *UndoOptions) RunUndo() error {
 	r := o.Builder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
@@ -166,7 +162,7 @@ func (o *UndoOptions) RunUndo() error {
 			return err
 		}
 
-		return printer.PrintObj(info.Object, o.Out)
+		return printer.PrintObj(cmdutil.AsDefaultVersionedOrOriginal(info.Object, info.Mapping), o.Out)
 	})
 
 	return err

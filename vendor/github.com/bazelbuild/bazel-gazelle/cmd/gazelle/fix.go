@@ -19,15 +19,11 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-
-	"github.com/bazelbuild/bazel-gazelle/internal/config"
-	"github.com/bazelbuild/bazel-gazelle/internal/rule"
 )
 
-func fixFile(c *config.Config, f *rule.File) error {
-	outPath := findOutputPath(c, f)
-	if err := os.MkdirAll(filepath.Dir(outPath), 0777); err != nil {
+func fixFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
 		return err
 	}
-	return ioutil.WriteFile(outPath, f.Format(), 0666)
+	return ioutil.WriteFile(path, data, 0666)
 }

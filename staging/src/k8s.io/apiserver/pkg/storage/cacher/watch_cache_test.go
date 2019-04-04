@@ -56,10 +56,11 @@ func makeTestPod(name string, resourceVersion uint64) *v1.Pod {
 
 func makeTestStoreElement(pod *v1.Pod) *storeElement {
 	return &storeElement{
-		Key:    "prefix/ns/" + pod.Name,
-		Object: pod,
-		Labels: labels.Set(pod.Labels),
-		Fields: fields.Set{"spec.nodeName": pod.Spec.NodeName},
+		Key:           "prefix/ns/" + pod.Name,
+		Object:        pod,
+		Labels:        labels.Set(pod.Labels),
+		Fields:        fields.Set{"spec.nodeName": pod.Spec.NodeName},
+		Uninitialized: false,
 	}
 }
 
@@ -68,12 +69,12 @@ func newTestWatchCache(capacity int) *watchCache {
 	keyFunc := func(obj runtime.Object) (string, error) {
 		return storage.NamespaceKeyFunc("prefix", obj)
 	}
-	getAttrsFunc := func(obj runtime.Object) (labels.Set, fields.Set, error) {
+	getAttrsFunc := func(obj runtime.Object) (labels.Set, fields.Set, bool, error) {
 		pod, ok := obj.(*v1.Pod)
 		if !ok {
-			return nil, nil, fmt.Errorf("not a pod")
+			return nil, nil, false, fmt.Errorf("not a pod")
 		}
-		return labels.Set(pod.Labels), fields.Set{"spec.nodeName": pod.Spec.NodeName}, nil
+		return labels.Set(pod.Labels), fields.Set{"spec.nodeName": pod.Spec.NodeName}, false, nil
 	}
 	versioner := etcd.APIObjectVersioner{}
 	wc := newWatchCache(capacity, keyFunc, getAttrsFunc, versioner)

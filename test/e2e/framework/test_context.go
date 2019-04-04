@@ -21,26 +21,20 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"sort"
-	"strings"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/onsi/ginkgo/config"
-	"github.com/pkg/errors"
+	utilflag "k8s.io/apiserver/pkg/util/flag"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-	cliflag "k8s.io/component-base/cli/flag"
-	"k8s.io/klog"
+	cloudprovider "k8s.io/cloud-provider"
 	kubeletconfig "k8s.io/kubernetes/pkg/kubelet/apis/config"
+	"k8s.io/kubernetes/pkg/kubemark"
 )
 
-const (
-	defaultHost = "http://127.0.0.1:8080"
-
-	// DefaultNumNodes is the number of nodes. If not specified, then number of nodes is auto-detected
-	DefaultNumNodes = -1
-)
+const defaultHost = "http://127.0.0.1:8080"
 
 // TestContextType contains test settings and global state. Due to
 // historic reasons, it is a mixture of items managed by the test
@@ -71,17 +65,16 @@ const (
 // Test suite authors can use framework/viper to make all command line
 // parameters also configurable via a configuration file.
 type TestContextType struct {
-	KubeConfig         string
-	KubeContext        string
-	KubeAPIContentType string
-	KubeVolumeDir      string
-	CertDir            string
-	Host               string
+	KubeConfig                 string
+	KubemarkExternalKubeConfig string
+	KubeContext                string
+	KubeAPIContentType         string
+	KubeVolumeDir              string
+	CertDir                    string
+	Host                       string
 	// TODO: Deprecating this over time... instead just use gobindata_util.go , see #23987.
 	RepoRoot                string
 	DockershimCheckpointDir string
-	// ListImages will list off all images that are used then quit
-	ListImages bool
 
 	// Provider identifies the infrastructure provider (gce, gke, aws)
 	Provider string
@@ -100,6 +93,7 @@ type TestContextType struct {
 	SystemPodsStartupTimeout    time.Duration
 	EtcdUpgradeStorage          string
 	EtcdUpgradeVersion          string
+	IngressUpgradeImage         string
 	GCEUpgradeScript            string
 	ContainerRuntime            string
 	ContainerRuntimeEndpoint    string
@@ -107,9 +101,7 @@ type TestContextType struct {
 	ContainerRuntimePidFile     string
 	// SystemdServices are comma separated list of systemd services the test framework
 	// will dump logs for.
-	SystemdServices string
-	// DumpSystemdJournal controls whether to dump the full systemd journal.
-	DumpSystemdJournal       bool
+	SystemdServices          string
 	ImageServiceEndpoint     string
 	MasterOSDistro           string
 	NodeOSDistro             string
@@ -125,7 +117,6 @@ type TestContextType struct {
 	GatherLogsSizes                   bool
 	GatherMetricsAfterTest            string
 	GatherSuiteMetricsAfterTest       bool
-	MaxNodesToGather                  int
 	AllowGatheringProfiles            bool
 	// If set to 'true' framework will gather ClusterAutoscaler metrics when gathering them for other components.
 	IncludeClusterAutoscalerMetrics bool
@@ -156,29 +147,6 @@ type TestContextType struct {
 
 	// Indicates what path the kubernetes-anywhere is installed on
 	KubernetesAnywherePath string
-
-	// The DNS Domain of the cluster.
-	ClusterDNSDomain string
-
-	// The configration of NodeKiller.
-	NodeKiller NodeKillerConfig
-}
-
-// NodeKillerConfig describes configuration of NodeKiller -- a utility to
-// simulate node failures.
-type NodeKillerConfig struct {
-	// Enabled determines whether NodeKill should do anything at all.
-	// All other options below are ignored if Enabled = false.
-	Enabled bool
-	// FailureRatio is a percentage of all nodes that could fail simultinously.
-	FailureRatio float64
-	// Interval is time between node failures.
-	Interval time.Duration
-	// JitterFactor is factor used to jitter node failures.
-	// Node will be killed between [Interval, Interval + (1.0 + JitterFactor)].
-	JitterFactor float64
-	// SimulatedDowntime is a duration between node is killed and recreated.
-	SimulatedDowntime time.Duration
 }
 
 // NodeTestContextType is part of TestContextType, it is shared by all node e2e test.
@@ -199,13 +167,10 @@ type NodeTestContextType struct {
 	// the node e2e test. If empty, the default one (system.DefaultSpec) is
 	// used. The system specs are in test/e2e_node/system/specs/.
 	SystemSpecName string
-	// ExtraEnvs is a map of environment names to values.
-	ExtraEnvs map[string]string
 }
 
-// CloudConfig holds the cloud configuration for e2e test suites.
 type CloudConfig struct {
-	APIEndpoint       string
+	ApiEndpoint       string
 	ProjectID         string
 	Zone              string // for multizone tests, arbitrarily chosen zone
 	Region            string
@@ -222,13 +187,13 @@ type CloudConfig struct {
 	NodeTag           string
 	MasterTag         string
 
-	Provider ProviderInterface
+	Provider           cloudprovider.Interface
+	KubemarkController *kubemark.KubemarkController
 }
 
-// TestContext should be used by all tests to access common context data.
 var TestContext TestContextType
 
-// RegisterCommonFlags registers flags common to all e2e test suites.
+// Register flags common to all e2e test suites.
 func RegisterCommonFlags() {
 	// Turn on verbose by default to get spec names
 	config.DefaultReporterConfig.Verbose = true
@@ -241,7 +206,6 @@ func RegisterCommonFlags() {
 
 	flag.StringVar(&TestContext.GatherKubeSystemResourceUsageData, "gather-resource-usage", "false", "If set to 'true' or 'all' framework will be monitoring resource usage of system all add-ons in (some) e2e tests, if set to 'master' framework will be monitoring master node only, if set to 'none' of 'false' monitoring will be turned off.")
 	flag.BoolVar(&TestContext.GatherLogsSizes, "gather-logs-sizes", false, "If set to true framework will be monitoring logs sizes on all machines running e2e tests.")
-	flag.IntVar(&TestContext.MaxNodesToGather, "max-nodes-to-gather-from", 20, "The maximum number of nodes to gather extended info from on test failure.")
 	flag.StringVar(&TestContext.GatherMetricsAfterTest, "gather-metrics-at-teardown", "false", "If set to 'true' framework will gather metrics from all components after each test. If set to 'master' only master component metrics would be gathered.")
 	flag.BoolVar(&TestContext.GatherSuiteMetricsAfterTest, "gather-suite-metrics-at-teardown", false, "If set to true framwork will gather metrics from all components after the whole test suite completes.")
 	flag.BoolVar(&TestContext.AllowGatheringProfiles, "allow-gathering-profiles", true, "If set to true framework will allow to gather CPU/memory allocation pprof profiles from the master.")
@@ -257,31 +221,29 @@ func RegisterCommonFlags() {
 	flag.StringVar(&TestContext.Host, "host", "", fmt.Sprintf("The host, or apiserver, to connect to. Will default to %s if this argument and --kubeconfig are not set", defaultHost))
 	flag.StringVar(&TestContext.ReportPrefix, "report-prefix", "", "Optional prefix for JUnit XML reports. Default is empty, which doesn't prepend anything to the default name.")
 	flag.StringVar(&TestContext.ReportDir, "report-dir", "", "Path to the directory where the JUnit XML reports should be saved. Default is empty, which doesn't generate these reports.")
-	flag.Var(cliflag.NewMapStringBool(&TestContext.FeatureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features.")
+	flag.Var(utilflag.NewMapStringBool(&TestContext.FeatureGates), "feature-gates", "A set of key=value pairs that describe feature gates for alpha/experimental features.")
 	flag.StringVar(&TestContext.ContainerRuntime, "container-runtime", "docker", "The container runtime of cluster VM instances (docker/remote).")
 	flag.StringVar(&TestContext.ContainerRuntimeEndpoint, "container-runtime-endpoint", "unix:///var/run/dockershim.sock", "The container runtime endpoint of cluster VM instances.")
 	flag.StringVar(&TestContext.ContainerRuntimeProcessName, "container-runtime-process-name", "dockerd", "The name of the container runtime process.")
 	flag.StringVar(&TestContext.ContainerRuntimePidFile, "container-runtime-pid-file", "/var/run/docker.pid", "The pid file of the container runtime.")
 	flag.StringVar(&TestContext.SystemdServices, "systemd-services", "docker", "The comma separated list of systemd services the framework will dump logs for.")
-	flag.BoolVar(&TestContext.DumpSystemdJournal, "dump-systemd-journal", false, "Whether to dump the full systemd journal.")
 	flag.StringVar(&TestContext.ImageServiceEndpoint, "image-service-endpoint", "", "The image service endpoint of cluster VM instances.")
 	flag.StringVar(&TestContext.DockershimCheckpointDir, "dockershim-checkpoint-dir", "/var/lib/dockershim/sandbox", "The directory for dockershim to store sandbox checkpoints.")
 	flag.StringVar(&TestContext.KubernetesAnywherePath, "kubernetes-anywhere-path", "/workspace/k8s.io/kubernetes-anywhere", "Which directory kubernetes-anywhere is installed to.")
-
-	flag.BoolVar(&TestContext.ListImages, "list-images", false, "If true, will show list of images used for runnning tests.")
 }
 
-// RegisterClusterFlags registers flags specific to the cluster e2e test suite.
+// Register flags specific to the cluster e2e test suite.
 func RegisterClusterFlags() {
 	flag.BoolVar(&TestContext.VerifyServiceAccount, "e2e-verify-service-account", true, "If true tests will verify the service account before running.")
 	flag.StringVar(&TestContext.KubeConfig, clientcmd.RecommendedConfigPathFlag, os.Getenv(clientcmd.RecommendedConfigPathEnvVar), "Path to kubeconfig containing embedded authinfo.")
+	flag.StringVar(&TestContext.KubemarkExternalKubeConfig, fmt.Sprintf("%s-%s", "kubemark-external", clientcmd.RecommendedConfigPathFlag), "", "Path to kubeconfig containing embedded authinfo for external cluster.")
 	flag.StringVar(&TestContext.KubeContext, clientcmd.FlagContext, "", "kubeconfig context to use/override. If unset, will use value from 'current-context'")
 	flag.StringVar(&TestContext.KubeAPIContentType, "kube-api-content-type", "application/vnd.kubernetes.protobuf", "ContentType used to communicate with apiserver")
 
 	flag.StringVar(&TestContext.KubeVolumeDir, "volume-dir", "/var/lib/kubelet", "Path to the directory containing the kubelet volumes.")
 	flag.StringVar(&TestContext.CertDir, "cert-dir", "", "Path to the directory containing the certs. Default is empty, which doesn't use certs.")
 	flag.StringVar(&TestContext.RepoRoot, "repo-root", "../../", "Root directory of kubernetes repository, for finding test files.")
-	flag.StringVar(&TestContext.Provider, "provider", "", "The name of the Kubernetes provider (gce, gke, local, skeleton (the fallback if not set), etc.)")
+	flag.StringVar(&TestContext.Provider, "provider", "", "The name of the Kubernetes provider (gce, gke, local, etc.)")
 	flag.StringVar(&TestContext.Tooling, "tooling", "", "The tooling in use (kops, gke, etc.)")
 	flag.StringVar(&TestContext.KubectlPath, "kubectl-path", "kubectl", "The kubectl binary to use. For development, you might use 'cluster/kubectl.sh' here.")
 	flag.StringVar(&TestContext.OutputDir, "e2e-output-dir", "/tmp", "Output directory for interesting/useful test data, like performance data, benchmarks, and other metrics.")
@@ -290,12 +252,11 @@ func RegisterClusterFlags() {
 	flag.StringVar(&TestContext.NodeOSDistro, "node-os-distro", "debian", "The OS distribution of cluster VM instances (debian, ubuntu, gci, coreos, or custom).")
 	flag.StringVar(&TestContext.ClusterMonitoringMode, "cluster-monitoring-mode", "standalone", "The monitoring solution that is used in the cluster.")
 	flag.BoolVar(&TestContext.EnablePrometheusMonitoring, "prometheus-monitoring", false, "Separate Prometheus monitoring deployed in cluster.")
-	flag.StringVar(&TestContext.ClusterDNSDomain, "dns-domain", "cluster.local", "The DNS Domain of the cluster.")
 
 	// TODO: Flags per provider?  Rename gce-project/gce-zone?
 	cloudConfig := &TestContext.CloudConfig
 	flag.StringVar(&cloudConfig.MasterName, "kube-master", "", "Name of the kubernetes master. Only required if provider is gce or gke")
-	flag.StringVar(&cloudConfig.APIEndpoint, "gce-api-endpoint", "", "The GCE APIEndpoint being used, if applicable")
+	flag.StringVar(&cloudConfig.ApiEndpoint, "gce-api-endpoint", "", "The GCE ApiEndpoint being used, if applicable")
 	flag.StringVar(&cloudConfig.ProjectID, "gce-project", "", "The GCE project being used, if applicable")
 	flag.StringVar(&cloudConfig.Zone, "gce-zone", "", "GCE zone being used, if applicable")
 	flag.StringVar(&cloudConfig.Region, "gce-region", "", "GCE region being used, if applicable")
@@ -304,7 +265,7 @@ func RegisterClusterFlags() {
 	flag.StringVar(&cloudConfig.Cluster, "gke-cluster", "", "GKE name of cluster being used, if applicable")
 	flag.StringVar(&cloudConfig.NodeInstanceGroup, "node-instance-group", "", "Name of the managed instance group for nodes. Valid only for gce, gke or aws. If there is more than one group: comma separated list of groups.")
 	flag.StringVar(&cloudConfig.Network, "network", "e2e", "The cloud provider network for this e2e cluster.")
-	flag.IntVar(&cloudConfig.NumNodes, "num-nodes", DefaultNumNodes, fmt.Sprintf("Number of nodes in the cluster. If the default value of '%q' is used the number of schedulable nodes is auto-detected.", DefaultNumNodes))
+	flag.IntVar(&cloudConfig.NumNodes, "num-nodes", -1, "Number of nodes in the cluster")
 	flag.StringVar(&cloudConfig.ClusterIPRange, "cluster-ip-range", "10.64.0.0/14", "A CIDR notation IP range from which to assign IPs in the cluster.")
 	flag.StringVar(&cloudConfig.NodeTag, "node-tag", "", "Network tags used on node instances. Valid only for gce, gke")
 	flag.StringVar(&cloudConfig.MasterTag, "master-tag", "", "Network tags used on master instances. Valid only for gce, gke")
@@ -317,18 +278,12 @@ func RegisterClusterFlags() {
 	flag.DurationVar(&TestContext.SystemDaemonsetStartupTimeout, "system-daemonsets-startup-timeout", 5*time.Minute, "Timeout for waiting for all system daemonsets to be ready.")
 	flag.StringVar(&TestContext.EtcdUpgradeStorage, "etcd-upgrade-storage", "", "The storage version to upgrade to (either 'etcdv2' or 'etcdv3') if doing an etcd upgrade test.")
 	flag.StringVar(&TestContext.EtcdUpgradeVersion, "etcd-upgrade-version", "", "The etcd binary version to upgrade to (e.g., '3.0.14', '2.3.7') if doing an etcd upgrade test.")
+	flag.StringVar(&TestContext.IngressUpgradeImage, "ingress-upgrade-image", "", "Image to upgrade to if doing an upgrade test for ingress.")
 	flag.StringVar(&TestContext.GCEUpgradeScript, "gce-upgrade-script", "", "Script to use to upgrade a GCE cluster.")
 	flag.BoolVar(&TestContext.CleanStart, "clean-start", false, "If true, purge all namespaces except default and system before running tests. This serves to Cleanup test namespaces from failed/interrupted e2e runs in a long-lived cluster.")
-
-	nodeKiller := &TestContext.NodeKiller
-	flag.BoolVar(&nodeKiller.Enabled, "node-killer", false, "Whether NodeKiller should kill any nodes.")
-	flag.Float64Var(&nodeKiller.FailureRatio, "node-killer-failure-ratio", 0.01, "Percentage of nodes to be killed")
-	flag.DurationVar(&nodeKiller.Interval, "node-killer-interval", 1*time.Minute, "Time between node failures.")
-	flag.Float64Var(&nodeKiller.JitterFactor, "node-killer-jitter-factor", 60, "Factor used to jitter node failures.")
-	flag.DurationVar(&nodeKiller.SimulatedDowntime, "node-killer-simulated-downtime", 10*time.Minute, "A delay between node death and recreation")
 }
 
-// RegisterNodeFlags registers flags specific to the node e2e test suite.
+// Register flags specific to the node e2e test suite.
 func RegisterNodeFlags() {
 	// Mark the test as node e2e when node flags are api.Registry.
 	TestContext.NodeE2E = true
@@ -343,7 +298,6 @@ func RegisterNodeFlags() {
 	flag.BoolVar(&TestContext.PrepullImages, "prepull-images", true, "If true, prepull images so image pull failures do not cause test failures.")
 	flag.StringVar(&TestContext.ImageDescription, "image-description", "", "The description of the image which the test will be running on.")
 	flag.StringVar(&TestContext.SystemSpecName, "system-spec-name", "", "The name of the system spec (e.g., gke) that's used in the node e2e test. The system specs are in test/e2e_node/system/specs/. This is used by the test framework to determine which tests to run for validating the system requirements.")
-	flag.Var(cliflag.NewMapStringString(&TestContext.ExtraEnvs), "extra-envs", "The extra environment variables needed for node e2e tests. Format: a list of key=value pairs, e.g., env1=val1,env2=val2")
 }
 
 // HandleFlags sets up all flags and parses the command line.
@@ -361,8 +315,7 @@ func createKubeConfig(clientCfg *restclient.Config) *clientcmdapi.Config {
 	config := clientcmdapi.NewConfig()
 
 	credentials := clientcmdapi.NewAuthInfo()
-	credentials.Token = clientCfg.BearerToken
-	credentials.TokenFile = clientCfg.BearerTokenFile
+	credentials.TokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	credentials.ClientCertificate = clientCfg.TLSClientConfig.CertFile
 	if len(credentials.ClientCertificate) == 0 {
 		credentials.ClientCertificateData = clientCfg.TLSClientConfig.CertData
@@ -402,47 +355,16 @@ func AfterReadingAllFlags(t *TestContextType) {
 				kubeConfig := createKubeConfig(clusterConfig)
 				clientcmd.WriteToFile(*kubeConfig, tempFile.Name())
 				t.KubeConfig = tempFile.Name()
-				klog.Infof("Using a temporary kubeconfig file from in-cluster config : %s", tempFile.Name())
+				glog.Infof("Using a temporary kubeconfig file from in-cluster config : %s", tempFile.Name())
 			}
 		}
 		if len(t.KubeConfig) == 0 {
-			klog.Warningf("Unable to find in-cluster config, using default host : %s", defaultHost)
+			glog.Warningf("Unable to find in-cluster config, using default host : %s", defaultHost)
 			t.Host = defaultHost
 		}
 	}
 	// Allow 1% of nodes to be unready (statistically) - relevant for large clusters.
 	if t.AllowedNotReadyNodes == 0 {
 		t.AllowedNotReadyNodes = t.CloudConfig.NumNodes / 100
-	}
-
-	// Make sure that all test runs have a valid TestContext.CloudConfig.Provider.
-	// TODO: whether and how long this code is needed is getting discussed
-	// in https://github.com/kubernetes/kubernetes/issues/70194.
-	if TestContext.Provider == "" {
-		// Some users of the e2e.test binary pass --provider=.
-		// We need to support that, changing it would break those usages.
-		Logf("The --provider flag is not set. Continuing as if --provider=skeleton had been used.")
-		TestContext.Provider = "skeleton"
-	}
-
-	var err error
-	TestContext.CloudConfig.Provider, err = SetupProviderConfig(TestContext.Provider)
-	if err != nil {
-		if os.IsNotExist(errors.Cause(err)) {
-			// Provide a more helpful error message when the provider is unknown.
-			var providers []string
-			for _, name := range GetProviders() {
-				// The empty string is accepted, but looks odd in the output below unless we quote it.
-				if name == "" {
-					name = `""`
-				}
-				providers = append(providers, name)
-			}
-			sort.Strings(providers)
-			klog.Errorf("Unknown provider %q. The following providers are known: %v", TestContext.Provider, strings.Join(providers, " "))
-		} else {
-			klog.Errorf("Failed to setup provider config for %q: %v", TestContext.Provider, err)
-		}
-		os.Exit(1)
 	}
 }

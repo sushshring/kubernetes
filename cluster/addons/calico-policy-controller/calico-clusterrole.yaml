@@ -30,6 +30,13 @@ rules:
       - pods/status
     verbs:
       - update
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
       - patch
   - apiGroups: [""]
     resources:
@@ -39,6 +46,13 @@ rules:
       - list
       - update
       - watch
+  - apiGroups: ["extensions"]
+    resources:
+      - networkpolicies
+    verbs:
+      - get
+      - list
+      - watch
   - apiGroups: ["networking.k8s.io"]
     resources:
       - networkpolicies
@@ -47,8 +61,10 @@ rules:
       - list
   - apiGroups: ["crd.projectcalico.org"]
     resources:
+      - globalfelixconfigs
       - felixconfigurations
       - bgppeers
+      - globalbgpconfigs
       - bgpconfigurations
       - ippools
       - globalnetworkpolicies
@@ -61,30 +77,4 @@ rules:
       - get
       - list
       - update
-      - watch
-  # Used in Calico v2.6 only - can be removed after upgrade.
-  - apiGroups: [""]
-    resources:
-      - pods
-    verbs:
-      - get
-      - list
-      - watch
-      - patch
-  - apiGroups: ["crd.projectcalico.org"]
-    resources:
-      - globalfelixconfigs
-      - globalbgpconfigs
-    verbs:
-      - create
-      - get
-      - list
-      - update
-      - watch
-  - apiGroups: ["extensions"]
-    resources:
-      - networkpolicies
-    verbs:
-      - get
-      - list
       - watch

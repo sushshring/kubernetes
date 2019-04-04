@@ -130,7 +130,7 @@ func NewReplicaSet(name, namespace string, replicas int32, podLabels map[string]
 	return &apps.ReplicaSet{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "ReplicaSet",
-			APIVersion: "apps/v1",
+			APIVersion: "extensions/v1beta1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: namespace,

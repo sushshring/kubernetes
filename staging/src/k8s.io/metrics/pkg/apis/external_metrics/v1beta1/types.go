@@ -23,7 +23,7 @@ import (
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// ExternalMetricValueList is a list of values for a given metric for some set labels
+// a list of values for a given metric for some set labels
 type ExternalMetricValueList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
@@ -34,7 +34,7 @@ type ExternalMetricValueList struct {
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// ExternalMetricValue is a metric value for external metric
+// a metric value for external metric
 // A single metric value is identified by metric name and a set of string labels.
 // For one metric there can be multiple values with different sets of labels.
 type ExternalMetricValue struct {

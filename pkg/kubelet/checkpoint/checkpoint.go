@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/kubernetes/pkg/apis/core"
@@ -93,14 +93,14 @@ func LoadPods(cpm checkpointmanager.CheckpointManager) ([]*v1.Pod, error) {
 	checkpointKeys := []string{}
 	checkpointKeys, err = cpm.ListCheckpoints()
 	if err != nil {
-		klog.Errorf("Failed to list checkpoints: %v", err)
+		glog.Errorf("Failed to list checkpoints: %v", err)
 	}
 
 	for _, key := range checkpointKeys {
 		checkpoint := NewPodCheckpoint(nil)
 		err := cpm.GetCheckpoint(key, checkpoint)
 		if err != nil {
-			klog.Errorf("Failed to retrieve checkpoint for pod %q: %v", key, err)
+			glog.Errorf("Failed to retrieve checkpoint for pod %q: %v", key, err)
 			continue
 		}
 		pods = append(pods, checkpoint.GetPod())

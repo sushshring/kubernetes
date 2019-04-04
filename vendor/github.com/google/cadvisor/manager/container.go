@@ -39,7 +39,7 @@ import (
 	"github.com/google/cadvisor/utils/cpuload"
 
 	units "github.com/docker/go-units"
-	"k8s.io/klog"
+	"github.com/golang/glog"
 	"k8s.io/utils/clock"
 )
 
@@ -47,9 +47,7 @@ import (
 var enableLoadReader = flag.Bool("enable_load_reader", false, "Whether to enable cpu load reader")
 var HousekeepingInterval = flag.Duration("housekeeping_interval", 1*time.Second, "Interval between container housekeepings")
 
-// cgroup type chosen to fetch the cgroup path of a process.
-// Memory has been chosen, as it is one of the default cgroups that is enabled for most containers.
-var cgroupPathRegExp = regexp.MustCompile(`memory[^:]*:(.*?)[,;$]`)
+var cgroupPathRegExp = regexp.MustCompile(`devices[^:]*:(.*?)[,;$]`)
 
 type containerInfo struct {
 	info.ContainerReference
@@ -187,8 +185,8 @@ func (c *containerData) getCgroupPath(cgroups string) (string, error) {
 	}
 	matches := cgroupPathRegExp.FindSubmatch([]byte(cgroups))
 	if len(matches) != 2 {
-		klog.V(3).Infof("failed to get memory cgroup path from %q", cgroups)
-		// return root in case of failures - memory hierarchy might not be enabled.
+		glog.V(3).Infof("failed to get devices cgroup path from %q", cgroups)
+		// return root in case of failures - devices hierarchy might not be enabled.
 		return "/", nil
 	}
 	return string(matches[1]), nil
@@ -208,7 +206,7 @@ func (c *containerData) ReadFile(filepath string, inHostNamespace bool) ([]byte,
 	}
 	for _, pid := range pids {
 		filePath := path.Join(rootfs, "/proc", pid, "/root", filepath)
-		klog.V(3).Infof("Trying path %q", filePath)
+		glog.V(3).Infof("Trying path %q", filePath)
 		data, err := ioutil.ReadFile(filePath)
 		if err == nil {
 			return data, err
@@ -268,10 +266,6 @@ func (c *containerData) getContainerPids(inHostNamespace bool) ([]string, error)
 func (c *containerData) GetProcessList(cadvisorContainer string, inHostNamespace bool) ([]v2.ProcessInfo, error) {
 	// report all processes for root.
 	isRoot := c.info.Name == "/"
-	rootfs := "/"
-	if !inHostNamespace {
-		rootfs = "/rootfs"
-	}
 	format := "user,pid,ppid,stime,pcpu,pmem,rss,vsz,stat,time,comm,cgroup"
 	out, err := c.getPsOutput(inHostNamespace, format)
 	if err != nil {
@@ -330,15 +324,6 @@ func (c *containerData) GetProcessList(cadvisorContainer string, inHostNamespace
 			cgroupPath = cgroup
 		}
 
-		var fdCount int
-		dirPath := path.Join(rootfs, "/proc", strconv.Itoa(pid), "fd")
-		fds, err := ioutil.ReadDir(dirPath)
-		if err != nil {
-			klog.V(4).Infof("error while listing directory %q to measure fd count: %v", dirPath, err)
-			continue
-		}
-		fdCount = len(fds)
-
 		if isRoot || c.info.Name == cgroup {
 			processes = append(processes, v2.ProcessInfo{
 				User:          fields[0],
@@ -353,7 +338,6 @@ func (c *containerData) GetProcessList(cadvisorContainer string, inHostNamespace
 				RunningTime:   fields[9],
 				Cmd:           fields[10],
 				CgroupPath:    cgroupPath,
-				FdCount:       fdCount,
 			})
 		}
 	}
@@ -393,7 +377,7 @@ func newContainerData(containerName string, memoryCache *memory.InMemoryCache, h
 		// Create cpu load reader.
 		loadReader, err := cpuload.New()
 		if err != nil {
-			klog.Warningf("Could not initialize cpu load reader for %q: %s", ref.Name, err)
+			glog.Warningf("Could not initialize cpu load reader for %q: %s", ref.Name, err)
 		} else {
 			cont.loadReader = loadReader
 		}
@@ -406,7 +390,7 @@ func newContainerData(containerName string, memoryCache *memory.InMemoryCache, h
 	cont.summaryReader, err = summary.New(cont.info.Spec)
 	if err != nil {
 		cont.summaryReader = nil
-		klog.Warningf("Failed to create summary reader for %q: %v", ref.Name, err)
+		glog.Warningf("Failed to create summary reader for %q: %v", ref.Name, err)
 	}
 
 	return cont, nil
@@ -419,7 +403,7 @@ func (self *containerData) nextHousekeepingInterval() time.Duration {
 		stats, err := self.memoryCache.RecentStats(self.info.Name, empty, empty, 2)
 		if err != nil {
 			if self.allowErrorLogging() {
-				klog.Warningf("Failed to get RecentStats(%q) while determining the next housekeeping: %v", self.info.Name, err)
+				glog.Warningf("Failed to get RecentStats(%q) while determining the next housekeeping: %v", self.info.Name, err)
 			}
 		} else if len(stats) == 2 {
 			// TODO(vishnuk): Use no processes as a signal.
@@ -449,7 +433,7 @@ func (c *containerData) housekeeping() {
 	if c.loadReader != nil {
 		err := c.loadReader.Start()
 		if err != nil {
-			klog.Warningf("Could not start cpu load stat collector for %q: %s", c.info.Name, err)
+			glog.Warningf("Could not start cpu load stat collector for %q: %s", c.info.Name, err)
 		}
 		defer c.loadReader.Stop()
 	}
@@ -461,7 +445,7 @@ func (c *containerData) housekeeping() {
 	}
 
 	// Housekeep every second.
-	klog.V(3).Infof("Start housekeeping for container %q\n", c.info.Name)
+	glog.V(3).Infof("Start housekeeping for container %q\n", c.info.Name)
 	houseKeepingTimer := c.clock.NewTimer(0 * time.Second)
 	defer houseKeepingTimer.Stop()
 	for {
@@ -482,7 +466,7 @@ func (c *containerData) housekeeping() {
 			stats, err := c.memoryCache.RecentStats(c.info.Name, empty, empty, numSamples)
 			if err != nil {
 				if c.allowErrorLogging() {
-					klog.Warningf("[%s] Failed to get recent stats for logging usage: %v", c.info.Name, err)
+					glog.Warningf("[%s] Failed to get recent stats for logging usage: %v", c.info.Name, err)
 				}
 			} else if len(stats) < numSamples {
 				// Ignore, not enough stats yet.
@@ -499,7 +483,7 @@ func (c *containerData) housekeeping() {
 				usageInCores := float64(usageCpuNs) / float64(stats[numSamples-1].Timestamp.Sub(stats[0].Timestamp).Nanoseconds())
 				usageInHuman := units.HumanSize(float64(usageMemory))
 				// Don't set verbosity since this is already protected by the logUsage flag.
-				klog.Infof("[%s] %.3f cores (average: %.3f cores), %s of memory", c.info.Name, instantUsageInCores, usageInCores, usageInHuman)
+				glog.Infof("[%s] %.3f cores (average: %.3f cores), %s of memory", c.info.Name, instantUsageInCores, usageInCores, usageInHuman)
 			}
 		}
 		houseKeepingTimer.Reset(c.nextHousekeepingInterval())
@@ -520,13 +504,13 @@ func (c *containerData) housekeepingTick(timer <-chan time.Time, longHousekeepin
 	err := c.updateStats()
 	if err != nil {
 		if c.allowErrorLogging() {
-			klog.Warningf("Failed to update stats for container \"%s\": %s", c.info.Name, err)
+			glog.Warningf("Failed to update stats for container \"%s\": %s", c.info.Name, err)
 		}
 	}
 	// Log if housekeeping took too long.
 	duration := c.clock.Since(start)
 	if duration >= longHousekeeping {
-		klog.V(3).Infof("[%s] Housekeeping took %s", c.info.Name, duration)
+		glog.V(3).Infof("[%s] Housekeeping took %s", c.info.Name, duration)
 	}
 	c.notifyOnDemand()
 	c.statsLastUpdatedTime = c.clock.Now()
@@ -600,7 +584,7 @@ func (c *containerData) updateStats() error {
 		err := c.summaryReader.AddSample(*stats)
 		if err != nil {
 			// Ignore summary errors for now.
-			klog.V(2).Infof("Failed to add summary stats for %q: %v", c.info.Name, err)
+			glog.V(2).Infof("Failed to add summary stats for %q: %v", c.info.Name, err)
 		}
 	}
 	var customStatsErr error

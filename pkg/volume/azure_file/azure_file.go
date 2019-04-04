@@ -22,18 +22,17 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/golang/glog"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
-	volumehelpers "k8s.io/cloud-provider/volume/helpers"
-	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure"
 	"k8s.io/kubernetes/pkg/util/mount"
+	kstrings "k8s.io/kubernetes/pkg/util/strings"
 	"k8s.io/kubernetes/pkg/volume"
 	volutil "k8s.io/kubernetes/pkg/volume/util"
-	utilstrings "k8s.io/utils/strings"
 )
 
 // ProbeVolumePlugins is the primary endpoint for volume plugins
@@ -54,7 +53,7 @@ const (
 )
 
 func getPath(uid types.UID, volName string, host volume.VolumeHost) string {
-	return host.GetPodVolumeDir(uid, utilstrings.EscapeQualifiedName(azureFilePluginName), volName)
+	return host.GetPodVolumeDir(uid, kstrings.EscapeQualifiedNameForDisk(azureFilePluginName), volName)
 }
 
 func (plugin *azureFilePlugin) Init(host volume.VolumeHost) error {
@@ -79,10 +78,6 @@ func (plugin *azureFilePlugin) CanSupport(spec *volume.Spec) bool {
 	//TODO: check if mount.cifs is there
 	return (spec.PersistentVolume != nil && spec.PersistentVolume.Spec.AzureFile != nil) ||
 		(spec.Volume != nil && spec.Volume.AzureFile != nil)
-}
-
-func (plugin *azureFilePlugin) IsMigratedToCSI() bool {
-	return false
 }
 
 func (plugin *azureFilePlugin) RequiresRemount() bool {
@@ -174,7 +169,7 @@ func (plugin *azureFilePlugin) ExpandVolumeDevice(
 		return oldSize, err
 	}
 
-	if err := azure.ResizeFileShare(accountName, accountKey, shareName, int(volumehelpers.RoundUpToGiB(newSize))); err != nil {
+	if err := azure.ResizeFileShare(accountName, accountKey, shareName, int(volutil.RoundUpToGiB(newSize))); err != nil {
 		return oldSize, err
 	}
 
@@ -242,20 +237,20 @@ func (b *azureFileMounter) SetUp(fsGroup *int64) error {
 
 func (b *azureFileMounter) SetUpAt(dir string, fsGroup *int64) error {
 	notMnt, err := b.mounter.IsLikelyNotMountPoint(dir)
-	klog.V(4).Infof("AzureFile mount set up: %s %v %v", dir, !notMnt, err)
+	glog.V(4).Infof("AzureFile mount set up: %s %v %v", dir, !notMnt, err)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	if !notMnt {
 		// testing original mount point, make sure the mount link is valid
 		if _, err := ioutil.ReadDir(dir); err == nil {
-			klog.V(4).Infof("azureFile - already mounted to target %s", dir)
+			glog.V(4).Infof("azureFile - already mounted to target %s", dir)
 			return nil
 		}
 		// mount link is invalid, now unmount and remount later
-		klog.Warningf("azureFile - ReadDir %s failed with %v, unmount this directory", dir, err)
+		glog.Warningf("azureFile - ReadDir %s failed with %v, unmount this directory", dir, err)
 		if err := b.mounter.Unmount(dir); err != nil {
-			klog.Errorf("azureFile - Unmount directory %s failed with %v", dir, err)
+			glog.Errorf("azureFile - Unmount directory %s failed with %v", dir, err)
 			return err
 		}
 		notMnt = true
@@ -290,22 +285,22 @@ func (b *azureFileMounter) SetUpAt(dir string, fsGroup *int64) error {
 	if err != nil {
 		notMnt, mntErr := b.mounter.IsLikelyNotMountPoint(dir)
 		if mntErr != nil {
-			klog.Errorf("IsLikelyNotMountPoint check failed: %v", mntErr)
+			glog.Errorf("IsLikelyNotMountPoint check failed: %v", mntErr)
 			return err
 		}
 		if !notMnt {
 			if mntErr = b.mounter.Unmount(dir); mntErr != nil {
-				klog.Errorf("Failed to unmount: %v", mntErr)
+				glog.Errorf("Failed to unmount: %v", mntErr)
 				return err
 			}
 			notMnt, mntErr := b.mounter.IsLikelyNotMountPoint(dir)
 			if mntErr != nil {
-				klog.Errorf("IsLikelyNotMountPoint check failed: %v", mntErr)
+				glog.Errorf("IsLikelyNotMountPoint check failed: %v", mntErr)
 				return err
 			}
 			if !notMnt {
 				// This is very odd, we don't expect it.  We'll try again next sync loop.
-				klog.Errorf("%s is still mounted, despite call to unmount().  Will try again next sync loop.", dir)
+				glog.Errorf("%s is still mounted, despite call to unmount().  Will try again next sync loop.", dir)
 				return err
 			}
 		}
@@ -326,7 +321,7 @@ func (c *azureFileUnmounter) TearDown() error {
 }
 
 func (c *azureFileUnmounter) TearDownAt(dir string) error {
-	return mount.CleanupMountPoint(dir, c.mounter, false)
+	return volutil.UnmountPath(dir, c.mounter)
 }
 
 func getVolumeSource(spec *volume.Spec) (string, bool, error) {
@@ -381,7 +376,7 @@ func getStorageEndpointSuffix(cloudprovider cloudprovider.Interface) string {
 	const publicCloudStorageEndpointSuffix = "core.windows.net"
 	azure, err := getAzureCloud(cloudprovider)
 	if err != nil {
-		klog.Warningf("No Azure cloud provider found. Using the Azure public cloud endpoint: %s", publicCloudStorageEndpointSuffix)
+		glog.Warningf("No Azure cloud provider found. Using the Azure public cloud endpoint: %s", publicCloudStorageEndpointSuffix)
 		return publicCloudStorageEndpointSuffix
 	}
 	return azure.Environment.StorageEndpointSuffix

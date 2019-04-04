@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,8 +29,6 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 
 	"k8s.io/kubernetes/test/e2e/framework"
-	"k8s.io/kubernetes/test/e2e/framework/ingress"
-	"k8s.io/kubernetes/test/e2e/framework/providers/gce"
 )
 
 const (
@@ -62,17 +59,17 @@ var (
 // IngressScaleFramework defines the framework for ingress scale testing.
 type IngressScaleFramework struct {
 	Clientset     clientset.Interface
-	Jig           *ingress.TestJig
-	GCEController *gce.IngressController
+	Jig           *framework.IngressTestJig
+	GCEController *framework.GCEIngressController
 	CloudConfig   framework.CloudConfig
-	Logger        ingress.TestLogger
+	Logger        framework.TestLogger
 
 	Namespace        string
 	EnableTLS        bool
 	NumIngressesTest []int
 	OutputFile       string
 
-	ScaleTestDeploy *apps.Deployment
+	ScaleTestDeploy *extensions.Deployment
 	ScaleTestSvcs   []*v1.Service
 	ScaleTestIngs   []*extensions.Ingress
 
@@ -95,7 +92,7 @@ func NewIngressScaleFramework(cs clientset.Interface, ns string, cloudConfig fra
 		Namespace:   ns,
 		Clientset:   cs,
 		CloudConfig: cloudConfig,
-		Logger:      &ingress.E2ELogger{},
+		Logger:      &framework.E2ELogger{},
 		EnableTLS:   true,
 		NumIngressesTest: []int{
 			numIngressesSmall,
@@ -109,10 +106,10 @@ func NewIngressScaleFramework(cs clientset.Interface, ns string, cloudConfig fra
 // PrepareScaleTest prepares framework for ingress scale testing.
 func (f *IngressScaleFramework) PrepareScaleTest() error {
 	f.Logger.Infof("Initializing ingress test suite and gce controller...")
-	f.Jig = ingress.NewIngressTestJig(f.Clientset)
+	f.Jig = framework.NewIngressTestJig(f.Clientset)
 	f.Jig.Logger = f.Logger
 	f.Jig.PollInterval = scaleTestPollInterval
-	f.GCEController = &gce.IngressController{
+	f.GCEController = &framework.GCEIngressController{
 		Client: f.Clientset,
 		Cloud:  f.CloudConfig,
 	}
@@ -148,13 +145,13 @@ func (f *IngressScaleFramework) CleanupScaleTest() []error {
 	}
 	if f.ScaleTestDeploy != nil {
 		f.Logger.Infof("Cleaning up deployment %s...", f.ScaleTestDeploy.Name)
-		if err := f.Clientset.AppsV1().Deployments(f.ScaleTestDeploy.Namespace).Delete(f.ScaleTestDeploy.Name, nil); err != nil {
+		if err := f.Clientset.ExtensionsV1beta1().Deployments(f.ScaleTestDeploy.Namespace).Delete(f.ScaleTestDeploy.Name, nil); err != nil {
 			errs = append(errs, fmt.Errorf("Error while delting deployment %s/%s: %v", f.ScaleTestDeploy.Namespace, f.ScaleTestDeploy.Name, err))
 		}
 	}
 
 	f.Logger.Infof("Cleaning up cloud resources...")
-	if err := f.GCEController.CleanupIngressControllerWithTimeout(ingressesCleanupTimeout); err != nil {
+	if err := f.GCEController.CleanupGCEIngressControllerWithTimeout(ingressesCleanupTimeout); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -167,7 +164,7 @@ func (f *IngressScaleFramework) RunScaleTest() []error {
 
 	testDeploy := generateScaleTestBackendDeploymentSpec(scaleTestNumBackends)
 	f.Logger.Infof("Creating deployment %s...", testDeploy.Name)
-	testDeploy, err := f.Jig.Client.AppsV1().Deployments(f.Namespace).Create(testDeploy)
+	testDeploy, err := f.Jig.Client.ExtensionsV1beta1().Deployments(f.Namespace).Create(testDeploy)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("Failed to create deployment %s: %v", testDeploy.Name, err))
 		return errs
@@ -437,12 +434,12 @@ func generateScaleTestServiceSpec(suffix string) *v1.Service {
 	}
 }
 
-func generateScaleTestBackendDeploymentSpec(numReplicas int32) *apps.Deployment {
-	return &apps.Deployment{
+func generateScaleTestBackendDeploymentSpec(numReplicas int32) *extensions.Deployment {
+	return &extensions.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: scaleTestBackendName,
 		},
-		Spec: apps.DeploymentSpec{
+		Spec: extensions.DeploymentSpec{
 			Replicas: &numReplicas,
 			Selector: &metav1.LabelSelector{MatchLabels: scaleTestLabels},
 			Template: v1.PodTemplateSpec{

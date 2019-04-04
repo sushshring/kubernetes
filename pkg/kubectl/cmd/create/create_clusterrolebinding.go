@@ -20,9 +20,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/kubectl/generate"
-	generateversioned "k8s.io/kubernetes/pkg/kubectl/generate/versioned"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/kubectl/util/templates"
 )
@@ -36,14 +35,13 @@ var (
 		  kubectl create clusterrolebinding cluster-admin --clusterrole=cluster-admin --user=user1 --user=user2 --group=group1`))
 )
 
-// ClusterRoleBindingOpts is returned by NewCmdCreateClusterRoleBinding
 type ClusterRoleBindingOpts struct {
 	CreateSubcommandOptions *CreateSubcommandOptions
 }
 
-// NewCmdCreateClusterRoleBinding returns an initialized command instance of ClusterRoleBinding
+// ClusterRoleBinding is a command to ease creating ClusterRoleBindings.
 func NewCmdCreateClusterRoleBinding(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
-	o := &ClusterRoleBindingOpts{
+	options := &ClusterRoleBindingOpts{
 		CreateSubcommandOptions: NewCreateSubcommandOptions(ioStreams),
 	}
 
@@ -54,16 +52,16 @@ func NewCmdCreateClusterRoleBinding(f cmdutil.Factory, ioStreams genericclioptio
 		Long:                  clusterRoleBindingLong,
 		Example:               clusterRoleBindingExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			cmdutil.CheckErr(o.Complete(f, cmd, args))
-			cmdutil.CheckErr(o.Run())
+			cmdutil.CheckErr(options.Complete(f, cmd, args))
+			cmdutil.CheckErr(options.Run())
 		},
 	}
 
-	o.CreateSubcommandOptions.PrintFlags.AddFlags(cmd)
+	options.CreateSubcommandOptions.PrintFlags.AddFlags(cmd)
 
 	cmdutil.AddApplyAnnotationFlags(cmd)
 	cmdutil.AddValidateFlags(cmd)
-	cmdutil.AddGeneratorFlags(cmd, generateversioned.ClusterRoleBindingV1GeneratorName)
+	cmdutil.AddGeneratorFlags(cmd, cmdutil.ClusterRoleBindingV1GeneratorName)
 	cmd.Flags().String("clusterrole", "", i18n.T("ClusterRole this ClusterRoleBinding should reference"))
 	cmd.MarkFlagCustom("clusterrole", "__kubectl_get_resource_clusterrole")
 	cmd.Flags().StringArray("user", []string{}, "Usernames to bind to the clusterrole")
@@ -72,17 +70,16 @@ func NewCmdCreateClusterRoleBinding(f cmdutil.Factory, ioStreams genericclioptio
 	return cmd
 }
 
-// Complete completes all the required options
 func (o *ClusterRoleBindingOpts) Complete(f cmdutil.Factory, cmd *cobra.Command, args []string) error {
 	name, err := NameFromCommandArgs(cmd, args)
 	if err != nil {
 		return err
 	}
 
-	var generator generate.StructuredGenerator
+	var generator kubectl.StructuredGenerator
 	switch generatorName := cmdutil.GetFlagString(cmd, "generator"); generatorName {
-	case generateversioned.ClusterRoleBindingV1GeneratorName:
-		generator = &generateversioned.ClusterRoleBindingGeneratorV1{
+	case cmdutil.ClusterRoleBindingV1GeneratorName:
+		generator = &kubectl.ClusterRoleBindingGeneratorV1{
 			Name:            name,
 			ClusterRole:     cmdutil.GetFlagString(cmd, "clusterrole"),
 			Users:           cmdutil.GetFlagStringArray(cmd, "user"),
@@ -96,7 +93,7 @@ func (o *ClusterRoleBindingOpts) Complete(f cmdutil.Factory, cmd *cobra.Command,
 	return o.CreateSubcommandOptions.Complete(f, cmd, args, generator)
 }
 
-// Run calls the CreateSubcommandOptions.Run in ClusterRoleBindingOpts instance
+// CreateClusterRoleBinding is the implementation of the create clusterrolebinding command.
 func (o *ClusterRoleBindingOpts) Run() error {
 	return o.CreateSubcommandOptions.Run()
 }

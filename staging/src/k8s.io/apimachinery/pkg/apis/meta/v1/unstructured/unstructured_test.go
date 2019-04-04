@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
 	"k8s.io/apimachinery/pkg/api/apitesting/fuzzer"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metafuzzer "k8s.io/apimachinery/pkg/apis/meta/fuzzer"
@@ -116,7 +117,6 @@ func TestUnstructuredMetadataOmitempty(t *testing.T) {
 	u.SetInitializers(nil)
 	u.SetFinalizers(nil)
 	u.SetClusterName("")
-	u.SetManagedFields(nil)
 
 	gotMetadata, _, err := unstructured.NestedFieldNoCopy(u.UnstructuredContent(), "metadata")
 	if err != nil {
@@ -159,5 +159,4 @@ func setObjectMetaUsingAccessors(u, uCopy *unstructured.Unstructured) {
 	uCopy.SetInitializers(u.GetInitializers())
 	uCopy.SetFinalizers(u.GetFinalizers())
 	uCopy.SetClusterName(u.GetClusterName())
-	uCopy.SetManagedFields(u.GetManagedFields())
 }

@@ -51,7 +51,7 @@ func (f *fakeRemoteAttach) Attach(method string, url *url.URL, config *restclien
 	return f.err
 }
 
-func fakeAttachablePodFn(pod *corev1.Pod) polymorphichelpers.AttachablePodForObjectFunc {
+func fakeAttachablePodFn(pod *corev1.Pod) polymorphichelpers.AttachableLogsForObjectFunc {
 	return func(getter genericclioptions.RESTClientGetter, obj runtime.Object, timeout time.Duration) (*corev1.Pod, error) {
 		return pod, nil
 	}

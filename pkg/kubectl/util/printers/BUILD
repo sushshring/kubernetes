@@ -5,7 +5,6 @@ go_library(
     srcs = ["tabwriter.go"],
     importpath = "k8s.io/kubernetes/pkg/kubectl/util/printers",
     visibility = ["//visibility:public"],
-    deps = ["//vendor/github.com/liggitt/tabwriter:go_default_library"],
 )
 
 filegroup(

@@ -1,11 +1,8 @@
-# See the OWNERS docs at https://go.k8s.io/owners
-
 approvers:
 - mikedanese
 - dims
 - wlan0
 - andrewsykim
-- cheftako
 reviewers:
 - thockin
 - lavalamp
@@ -46,7 +43,5 @@ reviewers:
 - wlan0
 - cheftako
 - andrewsykim
-- mcrute
 labels:
 - sig/cloud-provider
-- area/cloudprovider

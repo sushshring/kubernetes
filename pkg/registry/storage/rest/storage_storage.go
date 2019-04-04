@@ -24,12 +24,8 @@ import (
 	"k8s.io/apiserver/pkg/registry/rest"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	serverstorage "k8s.io/apiserver/pkg/server/storage"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	storageapi "k8s.io/kubernetes/pkg/apis/storage"
-	"k8s.io/kubernetes/pkg/features"
-	csidriverstore "k8s.io/kubernetes/pkg/registry/storage/csidriver/storage"
-	csinodestore "k8s.io/kubernetes/pkg/registry/storage/csinode/storage"
 	storageclassstore "k8s.io/kubernetes/pkg/registry/storage/storageclass/storage"
 	volumeattachmentstore "k8s.io/kubernetes/pkg/registry/storage/volumeattachment/storage"
 )
@@ -58,8 +54,8 @@ func (p RESTStorageProvider) NewRESTStorage(apiResourceConfigSource serverstorag
 func (p RESTStorageProvider) v1alpha1Storage(apiResourceConfigSource serverstorage.APIResourceConfigSource, restOptionsGetter generic.RESTOptionsGetter) map[string]rest.Storage {
 	storage := map[string]rest.Storage{}
 	// volumeattachments
-	volumeAttachmentStorage := volumeattachmentstore.NewStorage(restOptionsGetter)
-	storage["volumeattachments"] = volumeAttachmentStorage.VolumeAttachment
+	volumeAttachmentStorage := volumeattachmentstore.NewREST(restOptionsGetter)
+	storage["volumeattachments"] = volumeAttachmentStorage
 
 	return storage
 }
@@ -71,36 +67,17 @@ func (p RESTStorageProvider) v1beta1Storage(apiResourceConfigSource serverstorag
 	storage["storageclasses"] = storageClassStorage
 
 	// volumeattachments
-	volumeAttachmentStorage := volumeattachmentstore.NewStorage(restOptionsGetter)
-	storage["volumeattachments"] = volumeAttachmentStorage.VolumeAttachment
-
-	// register csinodes if CSINodeInfo feature gate is enabled
-	if utilfeature.DefaultFeatureGate.Enabled(features.CSINodeInfo) {
-		csiNodeStorage := csinodestore.NewStorage(restOptionsGetter)
-		storage["csinodes"] = csiNodeStorage.CSINode
-	}
-
-	// register csidrivers if CSIDriverRegistry feature gate is enabled
-	if utilfeature.DefaultFeatureGate.Enabled(features.CSIDriverRegistry) {
-		csiDriverStorage := csidriverstore.NewStorage(restOptionsGetter)
-		storage["csidrivers"] = csiDriverStorage.CSIDriver
-	}
+	volumeAttachmentStorage := volumeattachmentstore.NewREST(restOptionsGetter)
+	storage["volumeattachments"] = volumeAttachmentStorage
 
 	return storage
 }
 
 func (p RESTStorageProvider) v1Storage(apiResourceConfigSource serverstorage.APIResourceConfigSource, restOptionsGetter generic.RESTOptionsGetter) map[string]rest.Storage {
+	storage := map[string]rest.Storage{}
+	// storageclasses
 	storageClassStorage := storageclassstore.NewREST(restOptionsGetter)
-	volumeAttachmentStorage := volumeattachmentstore.NewStorage(restOptionsGetter)
-
-	storage := map[string]rest.Storage{
-		// storageclasses
-		"storageclasses": storageClassStorage,
-
-		// volumeattachments
-		"volumeattachments":        volumeAttachmentStorage.VolumeAttachment,
-		"volumeattachments/status": volumeAttachmentStorage.Status,
-	}
+	storage["storageclasses"] = storageClassStorage
 
 	return storage
 }

@@ -1,9 +1,11 @@
-# See the OWNERS docs at https://go.k8s.io/owners
-
 approvers:
-- sig-auth-policy-approvers
+  - deads2k
+  - liggitt
+  - pweil-
+  - tallclair
 reviewers:
-- sig-auth-policy-reviewers
-labels:
-- sig/auth
-
+  - deads2k
+  - liggitt
+  - php-coder
+  - pweil-
+  - tallclair

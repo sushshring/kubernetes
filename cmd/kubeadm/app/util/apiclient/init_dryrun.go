@@ -17,10 +17,9 @@ limitations under the License.
 package apiclient
 
 import (
+	"fmt"
 	"net"
 	"strings"
-
-	"github.com/pkg/errors"
 
 	"k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -40,18 +39,18 @@ import (
 // - GET /nodes/<node-name> -- must return a valid Node
 // - ...all other, unknown GETs/LISTs will be logged
 type InitDryRunGetter struct {
-	controlPlaneName string
-	serviceSubnet    string
+	masterName    string
+	serviceSubnet string
 }
 
 // InitDryRunGetter should implement the DryRunGetter interface
 var _ DryRunGetter = &InitDryRunGetter{}
 
 // NewInitDryRunGetter creates a new instance of the InitDryRunGetter struct
-func NewInitDryRunGetter(controlPlaneName string, serviceSubnet string) *InitDryRunGetter {
+func NewInitDryRunGetter(masterName string, serviceSubnet string) *InitDryRunGetter {
 	return &InitDryRunGetter{
-		controlPlaneName: controlPlaneName,
-		serviceSubnet:    serviceSubnet,
+		masterName:    masterName,
+		serviceSubnet: serviceSubnet,
 	}
 }
 
@@ -80,7 +79,7 @@ func (idr *InitDryRunGetter) HandleListAction(action core.ListAction) (bool, run
 }
 
 // handleKubernetesService returns a faked Kubernetes service in order to be able to continue running kubeadm init.
-// The kube-dns addon code GETs the Kubernetes service in order to extract the service subnet
+// The kube-dns addon code GETs the kubernetes service in order to extract the service subnet
 func (idr *InitDryRunGetter) handleKubernetesService(action core.GetAction) (bool, runtime.Object, error) {
 	if action.GetName() != "kubernetes" || action.GetNamespace() != metav1.NamespaceDefault || action.GetResource().Resource != "services" {
 		// We can't handle this event
@@ -89,12 +88,12 @@ func (idr *InitDryRunGetter) handleKubernetesService(action core.GetAction) (boo
 
 	_, svcSubnet, err := net.ParseCIDR(idr.serviceSubnet)
 	if err != nil {
-		return true, nil, errors.Wrapf(err, "error parsing CIDR %q", idr.serviceSubnet)
+		return true, nil, fmt.Errorf("error parsing CIDR %q: %v", idr.serviceSubnet, err)
 	}
 
 	internalAPIServerVirtualIP, err := ipallocator.GetIndexedIP(svcSubnet, 1)
 	if err != nil {
-		return true, nil, errors.Wrapf(err, "unable to get first IP address from the given CIDR (%s)", svcSubnet.String())
+		return true, nil, fmt.Errorf("unable to get first IP address from the given CIDR (%s): %v", svcSubnet.String(), err)
 	}
 
 	// The only used field of this Service object is the ClusterIP, which kube-dns uses to calculate its own IP
@@ -122,16 +121,16 @@ func (idr *InitDryRunGetter) handleKubernetesService(action core.GetAction) (boo
 
 // handleGetNode returns a fake node object for the purpose of moving kubeadm init forwards.
 func (idr *InitDryRunGetter) handleGetNode(action core.GetAction) (bool, runtime.Object, error) {
-	if action.GetName() != idr.controlPlaneName || action.GetResource().Resource != "nodes" {
+	if action.GetName() != idr.masterName || action.GetResource().Resource != "nodes" {
 		// We can't handle this event
 		return false, nil, nil
 	}
 
 	return true, &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: idr.controlPlaneName,
+			Name: idr.masterName,
 			Labels: map[string]string{
-				"kubernetes.io/hostname": idr.controlPlaneName,
+				"kubernetes.io/hostname": idr.masterName,
 			},
 			Annotations: map[string]string{},
 		},

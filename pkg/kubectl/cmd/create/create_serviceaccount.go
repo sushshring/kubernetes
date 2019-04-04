@@ -20,9 +20,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/kubectl/generate"
-	generateversioned "k8s.io/kubernetes/pkg/kubectl/generate/versioned"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/kubectl/util/templates"
 )
@@ -36,7 +35,6 @@ var (
 	  kubectl create serviceaccount my-service-account`))
 )
 
-// ServiceAccountOpts holds the options for 'create serviceaccount' sub command
 type ServiceAccountOpts struct {
 	CreateSubcommandOptions *CreateSubcommandOptions
 }
@@ -64,21 +62,20 @@ func NewCmdCreateServiceAccount(f cmdutil.Factory, ioStreams genericclioptions.I
 
 	cmdutil.AddApplyAnnotationFlags(cmd)
 	cmdutil.AddValidateFlags(cmd)
-	cmdutil.AddGeneratorFlags(cmd, generateversioned.ServiceAccountV1GeneratorName)
+	cmdutil.AddGeneratorFlags(cmd, cmdutil.ServiceAccountV1GeneratorName)
 	return cmd
 }
 
-// Complete completes all the required options
 func (o *ServiceAccountOpts) Complete(f cmdutil.Factory, cmd *cobra.Command, args []string) error {
 	name, err := NameFromCommandArgs(cmd, args)
 	if err != nil {
 		return err
 	}
 
-	var generator generate.StructuredGenerator
+	var generator kubectl.StructuredGenerator
 	switch generatorName := cmdutil.GetFlagString(cmd, "generator"); generatorName {
-	case generateversioned.ServiceAccountV1GeneratorName:
-		generator = &generateversioned.ServiceAccountGeneratorV1{Name: name}
+	case cmdutil.ServiceAccountV1GeneratorName:
+		generator = &kubectl.ServiceAccountGeneratorV1{Name: name}
 	default:
 		return errUnsupportedGenerator(cmd, generatorName)
 	}
@@ -86,7 +83,7 @@ func (o *ServiceAccountOpts) Complete(f cmdutil.Factory, cmd *cobra.Command, arg
 	return o.CreateSubcommandOptions.Complete(f, cmd, args, generator)
 }
 
-// Run calls the CreateSubcommandOptions.Run in ServiceAccountOpts instance
+// CreateServiceAccount implements the behavior to run the create service account command
 func (o *ServiceAccountOpts) Run() error {
 	return o.CreateSubcommandOptions.Run()
 }

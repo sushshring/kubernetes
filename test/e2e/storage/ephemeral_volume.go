@@ -30,6 +30,7 @@ import (
 	imageutils "k8s.io/kubernetes/test/utils/image"
 
 	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 )
 
 var (
@@ -54,7 +55,7 @@ var _ = utils.SIGDescribe("Ephemeralstorage", func() {
 			It(fmt.Sprintf("should allow deletion of pod with invalid volume : %s", testSource.volumeType), func() {
 				pod := testEphemeralVolumePod(f, testSource.volumeType, testSource.source)
 				pod, err := c.CoreV1().Pods(f.Namespace.Name).Create(pod)
-				framework.ExpectNoError(err)
+				Expect(err).NotTo(HaveOccurred())
 
 				// Allow it to sleep for 30 seconds
 				time.Sleep(30 * time.Second)

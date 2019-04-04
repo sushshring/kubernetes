@@ -26,7 +26,7 @@ import (
 	"k8s.io/api/core/v1"
 	"k8s.io/kubernetes/pkg/kubelet/config"
 	kubepod "k8s.io/kubernetes/pkg/kubelet/pod"
-	utilstrings "k8s.io/utils/strings"
+	"k8s.io/kubernetes/pkg/util/strings"
 )
 
 // Manager is an interface that tracks pods with mount utilities for individual
@@ -68,7 +68,7 @@ func NewManager(rootDirectory string, podManager kubepod.Manager) (Manager, erro
 
 func (m *basicManager) getVolumePluginRegistrationPath(pluginName string) string {
 	// sanitize plugin name so it does not escape directory
-	safePluginName := utilstrings.EscapeQualifiedName(pluginName) + ".json"
+	safePluginName := strings.EscapePluginName(pluginName) + ".json"
 	return path.Join(m.registrationDirectory, safePluginName)
 }
 

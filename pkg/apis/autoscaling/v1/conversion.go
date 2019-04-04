@@ -25,7 +25,8 @@ import (
 	"k8s.io/apimachinery/pkg/conversion"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/kubernetes/pkg/apis/autoscaling"
-	"k8s.io/kubernetes/pkg/apis/core"
+	api "k8s.io/kubernetes/pkg/apis/core"
+	core "k8s.io/kubernetes/pkg/apis/core"
 )
 
 func addConversionFuncs(scheme *runtime.Scheme) error {
@@ -297,7 +298,7 @@ func Convert_autoscaling_HorizontalPodAutoscaler_To_v1_HorizontalPodAutoscaler(i
 
 	otherMetrics := make([]autoscalingv1.MetricSpec, 0, len(in.Spec.Metrics))
 	for _, metric := range in.Spec.Metrics {
-		if metric.Type == autoscaling.ResourceMetricSourceType && metric.Resource != nil && metric.Resource.Name == core.ResourceCPU && metric.Resource.Target.AverageUtilization != nil {
+		if metric.Type == autoscaling.ResourceMetricSourceType && metric.Resource != nil && metric.Resource.Name == api.ResourceCPU && metric.Resource.Target.AverageUtilization != nil {
 			continue
 		}
 
@@ -410,7 +411,7 @@ func Convert_v1_HorizontalPodAutoscaler_To_autoscaling_HorizontalPodAutoscaler(i
 			{
 				Type: autoscaling.ResourceMetricSourceType,
 				Resource: &autoscaling.ResourceMetricSource{
-					Name: core.ResourceCPU,
+					Name: api.ResourceCPU,
 					Target: autoscaling.MetricTarget{
 						Type: autoscaling.UtilizationMetricType,
 					},
@@ -448,7 +449,7 @@ func Convert_autoscaling_HorizontalPodAutoscalerSpec_To_v1_HorizontalPodAutoscal
 	out.MaxReplicas = in.MaxReplicas
 
 	for _, metric := range in.Metrics {
-		if metric.Type == autoscaling.ResourceMetricSourceType && metric.Resource != nil && metric.Resource.Name == core.ResourceCPU {
+		if metric.Type == autoscaling.ResourceMetricSourceType && metric.Resource != nil && metric.Resource.Name == api.ResourceCPU {
 			if metric.Resource.Target.AverageUtilization != nil {
 				out.TargetCPUUtilizationPercentage = new(int32)
 				*out.TargetCPUUtilizationPercentage = *metric.Resource.Target.AverageUtilization
@@ -473,7 +474,7 @@ func Convert_v1_HorizontalPodAutoscalerSpec_To_autoscaling_HorizontalPodAutoscal
 			{
 				Type: autoscaling.ResourceMetricSourceType,
 				Resource: &autoscaling.ResourceMetricSource{
-					Name: core.ResourceCPU,
+					Name: api.ResourceCPU,
 					Target: autoscaling.MetricTarget{
 						Type: autoscaling.UtilizationMetricType,
 					},
@@ -495,7 +496,7 @@ func Convert_autoscaling_HorizontalPodAutoscalerStatus_To_v1_HorizontalPodAutosc
 	out.DesiredReplicas = in.DesiredReplicas
 
 	for _, metric := range in.CurrentMetrics {
-		if metric.Type == autoscaling.ResourceMetricSourceType && metric.Resource != nil && metric.Resource.Name == core.ResourceCPU {
+		if metric.Type == autoscaling.ResourceMetricSourceType && metric.Resource != nil && metric.Resource.Name == api.ResourceCPU {
 			if metric.Resource.Current.AverageUtilization != nil {
 
 				out.CurrentCPUUtilizationPercentage = new(int32)
@@ -518,7 +519,7 @@ func Convert_v1_HorizontalPodAutoscalerStatus_To_autoscaling_HorizontalPodAutosc
 			{
 				Type: autoscaling.ResourceMetricSourceType,
 				Resource: &autoscaling.ResourceMetricStatus{
-					Name: core.ResourceCPU,
+					Name: api.ResourceCPU,
 				},
 			},
 		}

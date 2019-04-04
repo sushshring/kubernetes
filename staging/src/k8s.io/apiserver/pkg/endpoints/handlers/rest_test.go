@@ -22,11 +22,11 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/evanphx/json-patch"
+
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,12 +38,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/diff"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
-	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/apis/example"
 	examplev1 "k8s.io/apiserver/pkg/apis/example/v1"
 	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
-	utiltrace "k8s.io/utils/trace"
+	utiltrace "k8s.io/apiserver/pkg/util/trace"
 )
 
 var (
@@ -149,10 +148,10 @@ func TestJSONPatch(t *testing.T) {
 		},
 	} {
 		p := &patcher{
-			patchType:  types.JSONPatchType,
-			patchBytes: []byte(test.patch),
+			patchType: types.JSONPatchType,
+			patchJS:   []byte(test.patch),
 		}
-		jp := jsonPatcher{patcher: p}
+		jp := jsonPatcher{p}
 		codec := codecs.LegacyCodec(examplev1.SchemeGroupVersion)
 		pod := &examplev1.Pod{}
 		pod.Name = "podA"
@@ -365,11 +364,9 @@ func (tc *patchTestCase) Run(t *testing.T) {
 	creater := runtime.ObjectCreater(scheme)
 	defaulter := runtime.ObjectDefaulter(scheme)
 	convertor := runtime.UnsafeObjectConvertor(scheme)
-	objectInterfaces := &admission.SchemeBasedObjectInterfaces{scheme}
 	kind := examplev1.SchemeGroupVersion.WithKind("Pod")
 	resource := examplev1.SchemeGroupVersion.WithResource("pods")
 	schemaReferenceObj := &examplev1.Pod{}
-	hubVersion := example.SchemeGroupVersion
 
 	for _, patchType := range []types.PatchType{types.JSONPatchType, types.MergePatchType, types.StrategicMergePatchType} {
 		// This needs to be reset on each iteration.
@@ -442,10 +439,6 @@ func (tc *patchTestCase) Run(t *testing.T) {
 			kind:            kind,
 			resource:        resource,
 
-			objectInterfaces: objectInterfaces,
-
-			hubGroupVersion: hubVersion,
-
 			createValidation: rest.ValidateAllObjectFunc,
 			updateValidation: admissionValidation,
 			admissionCheck:   admissionMutation,
@@ -457,12 +450,12 @@ func (tc *patchTestCase) Run(t *testing.T) {
 			restPatcher: testPatcher,
 			name:        name,
 			patchType:   patchType,
-			patchBytes:  patch,
+			patchJS:     patch,
 
 			trace: utiltrace.New("Patch" + name),
 		}
 
-		resultObj, _, err := p.patchResource(ctx, &RequestScope{})
+		resultObj, err := p.patchResource(ctx)
 		if len(tc.expectedError) != 0 {
 			if err == nil || err.Error() != tc.expectedError {
 				t.Errorf("%s: expected error %v, but got %v", tc.name, tc.expectedError, err)
@@ -839,15 +832,13 @@ func TestFinishRequest(t *testing.T) {
 	successStatusObj := &metav1.Status{Status: metav1.StatusSuccess, Message: "success message"}
 	errorStatusObj := &metav1.Status{Status: metav1.StatusFailure, Message: "error message"}
 	testcases := []struct {
-		name          string
-		timeout       time.Duration
-		fn            resultFunc
-		expectedObj   runtime.Object
-		expectedErr   error
-		expectedPanic string
+		timeout     time.Duration
+		fn          resultFunc
+		expectedObj runtime.Object
+		expectedErr error
 	}{
 		{
-			name:    "Expected obj is returned",
+			// Expected obj is returned.
 			timeout: time.Second,
 			fn: func() (runtime.Object, error) {
 				return exampleObj, nil
@@ -856,7 +847,7 @@ func TestFinishRequest(t *testing.T) {
 			expectedErr: nil,
 		},
 		{
-			name:    "Expected error is returned",
+			// Expected error is returned.
 			timeout: time.Second,
 			fn: func() (runtime.Object, error) {
 				return nil, exampleErr
@@ -865,7 +856,7 @@ func TestFinishRequest(t *testing.T) {
 			expectedErr: exampleErr,
 		},
 		{
-			name:    "Successful status object is returned as expected",
+			// Successful status object is returned as expected.
 			timeout: time.Second,
 			fn: func() (runtime.Object, error) {
 				return successStatusObj, nil
@@ -874,7 +865,7 @@ func TestFinishRequest(t *testing.T) {
 			expectedErr: nil,
 		},
 		{
-			name:    "Error status object is converted to StatusError",
+			// Error status object is converted to StatusError.
 			timeout: time.Second,
 			fn: func() (runtime.Object, error) {
 				return errorStatusObj, nil
@@ -882,48 +873,15 @@ func TestFinishRequest(t *testing.T) {
 			expectedObj: nil,
 			expectedErr: apierrors.FromObject(errorStatusObj),
 		},
-		{
-			name:    "Panic is propagated up",
-			timeout: time.Second,
-			fn: func() (runtime.Object, error) {
-				panic("my panic")
-			},
-			expectedObj:   nil,
-			expectedErr:   nil,
-			expectedPanic: "my panic",
-		},
-		{
-			name:    "Panic is propagated with stack",
-			timeout: time.Second,
-			fn: func() (runtime.Object, error) {
-				panic("my panic")
-			},
-			expectedObj:   nil,
-			expectedErr:   nil,
-			expectedPanic: "rest_test.go",
-		},
 	}
 	for i, tc := range testcases {
-		t.Run(tc.name, func(t *testing.T) {
-			defer func() {
-				r := recover()
-				switch {
-				case r == nil && len(tc.expectedPanic) > 0:
-					t.Errorf("expected panic containing '%s', got none", tc.expectedPanic)
-				case r != nil && len(tc.expectedPanic) == 0:
-					t.Errorf("unexpected panic: %v", r)
-				case r != nil && len(tc.expectedPanic) > 0 && !strings.Contains(fmt.Sprintf("%v", r), tc.expectedPanic):
-					t.Errorf("expected panic containing '%s', got '%v'", tc.expectedPanic, r)
-				}
-			}()
-			obj, err := finishRequest(tc.timeout, tc.fn)
-			if (err == nil && tc.expectedErr != nil) || (err != nil && tc.expectedErr == nil) || (err != nil && tc.expectedErr != nil && err.Error() != tc.expectedErr.Error()) {
-				t.Errorf("%d: unexpected err. expected: %v, got: %v", i, tc.expectedErr, err)
-			}
-			if !apiequality.Semantic.DeepEqual(obj, tc.expectedObj) {
-				t.Errorf("%d: unexpected obj. expected %#v, got %#v", i, tc.expectedObj, obj)
-			}
-		})
+		obj, err := finishRequest(tc.timeout, tc.fn)
+		if (err == nil && tc.expectedErr != nil) || (err != nil && tc.expectedErr == nil) || (err != nil && tc.expectedErr != nil && err.Error() != tc.expectedErr.Error()) {
+			t.Errorf("%d: unexpected err. expected: %v, got: %v", i, tc.expectedErr, err)
+		}
+		if !apiequality.Semantic.DeepEqual(obj, tc.expectedObj) {
+			t.Errorf("%d: unexpected obj. expected %#v, got %#v", i, tc.expectedObj, obj)
+		}
 	}
 }
 
@@ -941,12 +899,4 @@ func setTcPod(tcPod *example.Pod, name string, namespace string, uid types.UID, 
 	if len(nodeName) != 0 {
 		tcPod.Spec.NodeName = nodeName
 	}
-}
-
-func (f mutateObjectUpdateFunc) Handles(operation admission.Operation) bool {
-	return true
-}
-
-func (f mutateObjectUpdateFunc) Admit(a admission.Attributes, o admission.ObjectInterfaces) (err error) {
-	return f(a.GetObject(), a.GetOldObject())
 }

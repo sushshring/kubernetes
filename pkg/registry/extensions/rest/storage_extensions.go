@@ -28,7 +28,7 @@ import (
 	deploymentstore "k8s.io/kubernetes/pkg/registry/apps/deployment/storage"
 	replicasetstore "k8s.io/kubernetes/pkg/registry/apps/replicaset/storage"
 	expcontrollerstore "k8s.io/kubernetes/pkg/registry/extensions/controller/storage"
-	ingressstore "k8s.io/kubernetes/pkg/registry/networking/ingress/storage"
+	ingressstore "k8s.io/kubernetes/pkg/registry/extensions/ingress/storage"
 	networkpolicystore "k8s.io/kubernetes/pkg/registry/networking/networkpolicy/storage"
 	pspstore "k8s.io/kubernetes/pkg/registry/policy/podsecuritypolicy/storage"
 )
@@ -52,53 +52,39 @@ func (p RESTStorageProvider) v1beta1Storage(apiResourceConfigSource serverstorag
 
 	// This is a dummy replication controller for scale subresource purposes.
 	// TODO: figure out how to enable this only if needed as a part of scale subresource GA.
-	if apiResourceConfigSource.ResourceEnabled(extensionsapiv1beta1.SchemeGroupVersion.WithResource("replicationcontrollers")) {
-		controllerStorage := expcontrollerstore.NewStorage(restOptionsGetter)
-		storage["replicationcontrollers"] = controllerStorage.ReplicationController
-		storage["replicationcontrollers/scale"] = controllerStorage.Scale
-	}
+	controllerStorage := expcontrollerstore.NewStorage(restOptionsGetter)
+	storage["replicationcontrollers"] = controllerStorage.ReplicationController
+	storage["replicationcontrollers/scale"] = controllerStorage.Scale
 
 	// daemonsets
-	if apiResourceConfigSource.ResourceEnabled(extensionsapiv1beta1.SchemeGroupVersion.WithResource("daemonsets")) {
-		daemonSetStorage, daemonSetStatusStorage := daemonstore.NewREST(restOptionsGetter)
-		storage["daemonsets"] = daemonSetStorage.WithCategories(nil)
-		storage["daemonsets/status"] = daemonSetStatusStorage
-	}
+	daemonSetStorage, daemonSetStatusStorage := daemonstore.NewREST(restOptionsGetter)
+	storage["daemonsets"] = daemonSetStorage.WithCategories(nil)
+	storage["daemonsets/status"] = daemonSetStatusStorage
 
 	//deployments
-	if apiResourceConfigSource.ResourceEnabled(extensionsapiv1beta1.SchemeGroupVersion.WithResource("deployments")) {
-		deploymentStorage := deploymentstore.NewStorage(restOptionsGetter)
-		storage["deployments"] = deploymentStorage.Deployment.WithCategories(nil)
-		storage["deployments/status"] = deploymentStorage.Status
-		storage["deployments/rollback"] = deploymentStorage.Rollback
-		storage["deployments/scale"] = deploymentStorage.Scale
-	}
+	deploymentStorage := deploymentstore.NewStorage(restOptionsGetter)
+	storage["deployments"] = deploymentStorage.Deployment.WithCategories(nil)
+	storage["deployments/status"] = deploymentStorage.Status
+	storage["deployments/rollback"] = deploymentStorage.Rollback
+	storage["deployments/scale"] = deploymentStorage.Scale
 	// ingresses
-	if apiResourceConfigSource.ResourceEnabled(extensionsapiv1beta1.SchemeGroupVersion.WithResource("ingresses")) {
-		ingressStorage, ingressStatusStorage := ingressstore.NewREST(restOptionsGetter)
-		storage["ingresses"] = ingressStorage
-		storage["ingresses/status"] = ingressStatusStorage
-	}
+	ingressStorage, ingressStatusStorage := ingressstore.NewREST(restOptionsGetter)
+	storage["ingresses"] = ingressStorage
+	storage["ingresses/status"] = ingressStatusStorage
 
 	// podsecuritypolicy
-	if apiResourceConfigSource.ResourceEnabled(extensionsapiv1beta1.SchemeGroupVersion.WithResource("podsecuritypolicies")) {
-		podSecurityPolicyStorage := pspstore.NewREST(restOptionsGetter)
-		storage["podSecurityPolicies"] = podSecurityPolicyStorage
-	}
+	podSecurityPolicyStorage := pspstore.NewREST(restOptionsGetter)
+	storage["podSecurityPolicies"] = podSecurityPolicyStorage
 
 	// replicasets
-	if apiResourceConfigSource.ResourceEnabled(extensionsapiv1beta1.SchemeGroupVersion.WithResource("replicasets")) {
-		replicaSetStorage := replicasetstore.NewStorage(restOptionsGetter)
-		storage["replicasets"] = replicaSetStorage.ReplicaSet.WithCategories(nil)
-		storage["replicasets/status"] = replicaSetStorage.Status
-		storage["replicasets/scale"] = replicaSetStorage.Scale
-	}
+	replicaSetStorage := replicasetstore.NewStorage(restOptionsGetter)
+	storage["replicasets"] = replicaSetStorage.ReplicaSet.WithCategories(nil)
+	storage["replicasets/status"] = replicaSetStorage.Status
+	storage["replicasets/scale"] = replicaSetStorage.Scale
 
 	// networkpolicies
-	if apiResourceConfigSource.ResourceEnabled(extensionsapiv1beta1.SchemeGroupVersion.WithResource("networkpolicies")) {
-		networkExtensionsStorage := networkpolicystore.NewREST(restOptionsGetter)
-		storage["networkpolicies"] = networkExtensionsStorage
-	}
+	networkExtensionsStorage := networkpolicystore.NewREST(restOptionsGetter)
+	storage["networkpolicies"] = networkExtensionsStorage
 
 	return storage
 }

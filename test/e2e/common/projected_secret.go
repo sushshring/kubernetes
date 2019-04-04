@@ -18,6 +18,7 @@ package common
 
 import (
 	"fmt"
+	"os"
 	"path"
 
 	"k8s.io/api/core/v1"
@@ -46,9 +47,8 @@ var _ = Describe("[sig-storage] Projected secret", func() {
 	   Release : v1.9
 	   Testname: Projected Volume, Secrets, volume mode 0400
 	   Description: A Pod is created with a projected volume source ‘secret’ to store a secret with a specified key with permission mode set to 0x400 on the Pod. Pod MUST be able to read the content of the key successfully and the mode MUST be -r—-—————.
-	   This test is marked LinuxOnly since Windows does not support setting specific file permissions.
 	*/
-	framework.ConformanceIt("should be consumable from pods in volume with defaultMode set [LinuxOnly] [NodeConformance]", func() {
+	framework.ConformanceIt("should be consumable from pods in volume with defaultMode set [NodeConformance]", func() {
 		defaultMode := int32(0400)
 		doProjectedSecretE2EWithoutMapping(f, &defaultMode, "projected-secret-test-"+string(uuid.NewUUID()), nil, nil)
 	})
@@ -57,9 +57,8 @@ var _ = Describe("[sig-storage] Projected secret", func() {
 	   Release : v1.9
 	   Testname: Project Volume, Secrets, non-root, custom fsGroup
 	   Description: A Pod is created with a projected volume source ‘secret’ to store a secret with a specified key. The volume has permission mode set to 0440, fsgroup set to 1001 and user set to non-root uid of 1000. Pod MUST be able to read the content of the key successfully and the mode MUST be -r—-r————-.
-	   This test is marked LinuxOnly since Windows does not support setting specific file permissions, or running as UID / GID.
 	*/
-	framework.ConformanceIt("should be consumable from pods in volume as non-root with defaultMode and fsGroup set [LinuxOnly] [NodeConformance]", func() {
+	framework.ConformanceIt("should be consumable from pods in volume as non-root with defaultMode and fsGroup set [NodeConformance]", func() {
 		defaultMode := int32(0440) /* setting fsGroup sets mode to at least 440 */
 		fsGroup := int64(1001)
 		uid := int64(1000)
@@ -79,9 +78,8 @@ var _ = Describe("[sig-storage] Projected secret", func() {
 	   Release : v1.9
 	   Testname: Projected Volume, Secrets, mapped, volume mode 0400
 	   Description: A Pod is created with a projected volume source ‘secret’ to store a secret with a specified key with permission mode set to 0400. The secret is also mapped to a specific name. Pod MUST be able to read the content of the key successfully and the mode MUST be -r—-—————— on the mapped volume.
-	   This test is marked LinuxOnly since Windows does not support setting specific file permissions.
 	*/
-	framework.ConformanceIt("should be consumable from pods in volume with mappings and Item Mode set [LinuxOnly] [NodeConformance]", func() {
+	framework.ConformanceIt("should be consumable from pods in volume with mappings and Item Mode set [NodeConformance]", func() {
 		mode := int32(0400)
 		doProjectedSecretE2EWithMapping(f, &mode)
 	})
@@ -195,10 +193,9 @@ var _ = Describe("[sig-storage] Projected secret", func() {
 			},
 		}
 
-		fileModeRegexp := framework.GetFileModeRegex("/etc/projected-secret-volume/data-1", nil)
-		f.TestContainerOutputRegexp("consume secrets", pod, 0, []string{
+		f.TestContainerOutput("consume secrets", pod, 0, []string{
 			"content of file \"/etc/projected-secret-volume/data-1\": value-1",
-			fileModeRegexp,
+			"mode of file \"/etc/projected-secret-volume/data-1\": -rw-r--r--",
 		})
 	})
 
@@ -402,26 +399,6 @@ var _ = Describe("[sig-storage] Projected secret", func() {
 		Eventually(pollUpdateLogs, podLogTimeout, framework.Poll).Should(ContainSubstring("value-3"))
 		Eventually(pollDeleteLogs, podLogTimeout, framework.Poll).Should(ContainSubstring("Error reading file /etc/projected-secret-volumes/delete/data-1"))
 	})
-
-	//The secret is in pending during volume creation until the secret objects are available
-	//or until mount the secret volume times out. There is no secret object defined for the pod, so it should return timeout exception unless it is marked optional.
-	//Slow (~5 mins)
-	It("Should fail non-optional pod creation due to secret object does not exist [Slow]", func() {
-		volumeMountPath := "/etc/projected-secret-volumes"
-		podName := "pod-secrets-" + string(uuid.NewUUID())
-		err := createNonOptionalSecretPod(f, volumeMountPath, podName)
-		Expect(err).To(HaveOccurred(), "created pod %q with non-optional secret in namespace %q", podName, f.Namespace.Name)
-	})
-
-	//Secret object defined for the pod, If a key is specified which is not present in the secret,
-	// the volume setup will error unless it is marked optional, during the pod creation.
-	//Slow (~5 mins)
-	It("Should fail non-optional pod creation due to the key in the secret object does not exist [Slow]", func() {
-		volumeMountPath := "/etc/secret-volumes"
-		podName := "pod-secrets-" + string(uuid.NewUUID())
-		err := createNonOptionalSecretPodWithSecret(f, volumeMountPath, podName)
-		Expect(err).To(HaveOccurred(), "created pod %q with non-optional secret in namespace %q", podName, f.Namespace.Name)
-	})
 })
 
 func doProjectedSecretE2EWithoutMapping(f *framework.Framework, defaultMode *int32,
@@ -484,6 +461,9 @@ func doProjectedSecretE2EWithoutMapping(f *framework.Framework, defaultMode *int
 	if defaultMode != nil {
 		//pod.Spec.Volumes[0].VolumeSource.Projected.Sources[0].Secret.DefaultMode = defaultMode
 		pod.Spec.Volumes[0].VolumeSource.Projected.DefaultMode = defaultMode
+	} else {
+		mode := int32(0644)
+		defaultMode = &mode
 	}
 
 	if fsGroup != nil || uid != nil {
@@ -493,13 +473,13 @@ func doProjectedSecretE2EWithoutMapping(f *framework.Framework, defaultMode *int
 		}
 	}
 
-	fileModeRegexp := framework.GetFileModeRegex("/etc/projected-secret-volume/data-1", defaultMode)
+	modeString := fmt.Sprintf("%v", os.FileMode(*defaultMode))
 	expectedOutput := []string{
 		"content of file \"/etc/projected-secret-volume/data-1\": value-1",
-		fileModeRegexp,
+		"mode of file \"/etc/projected-secret-volume/data-1\": " + modeString,
 	}
 
-	f.TestContainerOutputRegexp("consume secrets", pod, 0, expectedOutput)
+	f.TestContainerOutput("consume secrets", pod, 0, expectedOutput)
 }
 
 func doProjectedSecretE2EWithMapping(f *framework.Framework, mode *int32) {
@@ -567,13 +547,16 @@ func doProjectedSecretE2EWithMapping(f *framework.Framework, mode *int32) {
 	if mode != nil {
 		//pod.Spec.Volumes[0].VolumeSource.Projected.Sources[0].Secret.Items[0].Mode = mode
 		pod.Spec.Volumes[0].VolumeSource.Projected.DefaultMode = mode
+	} else {
+		defaultItemMode := int32(0644)
+		mode = &defaultItemMode
 	}
 
-	fileModeRegexp := framework.GetFileModeRegex("/etc/projected-secret-volume/new-path-data-1", mode)
+	modeString := fmt.Sprintf("%v", os.FileMode(*mode))
 	expectedOutput := []string{
 		"content of file \"/etc/projected-secret-volume/new-path-data-1\": value-1",
-		fileModeRegexp,
+		"mode of file \"/etc/projected-secret-volume/new-path-data-1\": " + modeString,
 	}
 
-	f.TestContainerOutputRegexp("consume secrets", pod, 0, expectedOutput)
+	f.TestContainerOutput("consume secrets", pod, 0, expectedOutput)
 }

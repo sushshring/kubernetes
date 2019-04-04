@@ -26,9 +26,9 @@ import (
 	"github.com/google/cadvisor/container/common"
 	"github.com/google/cadvisor/container/libcontainer"
 	"github.com/google/cadvisor/manager/watcher"
-	inotify "github.com/sigma/go-inotify"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
+	"golang.org/x/exp/inotify"
 )
 
 type rawContainerWatcher struct {
@@ -45,7 +45,7 @@ type rawContainerWatcher struct {
 }
 
 func NewRawContainerWatcher() (watcher.ContainerWatcher, error) {
-	cgroupSubsystems, err := libcontainer.GetAllCgroupSubsystems()
+	cgroupSubsystems, err := libcontainer.GetCgroupSubsystems()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cgroup subsystems: %v", err)
 	}
@@ -84,10 +84,10 @@ func (self *rawContainerWatcher) Start(events chan watcher.ContainerEvent) error
 			case event := <-self.watcher.Event():
 				err := self.processEvent(event, events)
 				if err != nil {
-					klog.Warningf("Error while processing event (%+v): %v", event, err)
+					glog.Warningf("Error while processing event (%+v): %v", event, err)
 				}
 			case err := <-self.watcher.Error():
-				klog.Warningf("Error while watching %q: %v", "/", err)
+				glog.Warningf("Error while watching %q:", "/", err)
 			case <-self.stopWatcher:
 				err := self.watcher.Close()
 				if err == nil {
@@ -126,7 +126,7 @@ func (self *rawContainerWatcher) watchDirectory(events chan watcher.ContainerEve
 		if cleanup {
 			_, err := self.watcher.RemoveWatch(containerName, dir)
 			if err != nil {
-				klog.Warningf("Failed to remove inotify watch for %q: %v", dir, err)
+				glog.Warningf("Failed to remove inotify watch for %q: %v", dir, err)
 			}
 		}
 	}()
@@ -143,7 +143,7 @@ func (self *rawContainerWatcher) watchDirectory(events chan watcher.ContainerEve
 			subcontainerName := path.Join(containerName, entry.Name())
 			alreadyWatchingSubDir, err := self.watchDirectory(events, entryPath, subcontainerName)
 			if err != nil {
-				klog.Errorf("Failed to watch directory %q: %v", entryPath, err)
+				glog.Errorf("Failed to watch directory %q: %v", entryPath, err)
 				if os.IsNotExist(err) {
 					// The directory may have been removed before watching. Try to watch the other
 					// subdirectories. (https://github.com/kubernetes/kubernetes/issues/28997)

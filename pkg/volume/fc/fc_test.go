@@ -254,7 +254,6 @@ func TestPluginVolume(t *testing.T) {
 
 func TestPluginPersistentVolume(t *testing.T) {
 	lun := int32(0)
-	fs := v1.PersistentVolumeFilesystem
 	vol := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "vol1",
@@ -267,7 +266,6 @@ func TestPluginPersistentVolume(t *testing.T) {
 					Lun:        &lun,
 				},
 			},
-			VolumeMode: &fs,
 		},
 	}
 	doTestPlugin(t, volume.NewSpecFromPersistentVolume(vol, false))
@@ -287,7 +285,6 @@ func TestPluginVolumeWWIDs(t *testing.T) {
 }
 
 func TestPluginPersistentVolumeWWIDs(t *testing.T) {
-	fs := v1.PersistentVolumeFilesystem
 	vol := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "vol1",
@@ -299,7 +296,6 @@ func TestPluginPersistentVolumeWWIDs(t *testing.T) {
 					FSType: "ext4",
 				},
 			},
-			VolumeMode: &fs,
 		},
 	}
 	doTestPlugin(t, volume.NewSpecFromPersistentVolume(vol, false))
@@ -318,7 +314,6 @@ func TestPluginVolumeNoDiskInfo(t *testing.T) {
 }
 
 func TestPluginPersistentVolumeNoDiskInfo(t *testing.T) {
-	fs := v1.PersistentVolumeFilesystem
 	vol := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "vol1",
@@ -329,7 +324,6 @@ func TestPluginPersistentVolumeNoDiskInfo(t *testing.T) {
 					FSType: "ext4",
 				},
 			},
-			VolumeMode: &fs,
 		},
 	}
 	doTestPluginNilMounter(t, volume.NewSpecFromPersistentVolume(vol, false))
@@ -343,7 +337,6 @@ func TestPersistentClaimReadOnlyFlag(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	lun := int32(0)
-	fs := v1.PersistentVolumeFilesystem
 	pv := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "pvA",
@@ -359,7 +352,6 @@ func TestPersistentClaimReadOnlyFlag(t *testing.T) {
 			ClaimRef: &v1.ObjectReference{
 				Name: "claimA",
 			},
-			VolumeMode: &fs,
 		},
 	}
 
@@ -370,7 +362,6 @@ func TestPersistentClaimReadOnlyFlag(t *testing.T) {
 		},
 		Spec: v1.PersistentVolumeClaimSpec{
 			VolumeName: "pvA",
-			VolumeMode: &fs,
 		},
 		Status: v1.PersistentVolumeClaimStatus{
 			Phase: v1.ClaimBound,

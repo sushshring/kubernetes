@@ -20,9 +20,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/kubectl/generate"
-	generateversioned "k8s.io/kubernetes/pkg/kubectl/generate/versioned"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/kubectl/util/templates"
 )
@@ -36,7 +35,6 @@ var (
 	kubectl create deployment my-dep --image=busybox`))
 )
 
-// DeploymentOpts is returned by NewCmdCreateDeployment
 type DeploymentOpts struct {
 	CreateSubcommandOptions *CreateSubcommandOptions
 }
@@ -79,30 +77,30 @@ func generatorFromName(
 	generatorName string,
 	imageNames []string,
 	deploymentName string,
-) (generate.StructuredGenerator, bool) {
+) (kubectl.StructuredGenerator, bool) {
 
 	switch generatorName {
-	case generateversioned.DeploymentBasicAppsV1GeneratorName:
-		generator := &generateversioned.DeploymentBasicAppsGeneratorV1{
-			BaseDeploymentGenerator: generateversioned.BaseDeploymentGenerator{
+	case cmdutil.DeploymentBasicAppsV1GeneratorName:
+		generator := &kubectl.DeploymentBasicAppsGeneratorV1{
+			BaseDeploymentGenerator: kubectl.BaseDeploymentGenerator{
 				Name:   deploymentName,
 				Images: imageNames,
 			},
 		}
 		return generator, true
 
-	case generateversioned.DeploymentBasicAppsV1Beta1GeneratorName:
-		generator := &generateversioned.DeploymentBasicAppsGeneratorV1Beta1{
-			BaseDeploymentGenerator: generateversioned.BaseDeploymentGenerator{
+	case cmdutil.DeploymentBasicAppsV1Beta1GeneratorName:
+		generator := &kubectl.DeploymentBasicAppsGeneratorV1Beta1{
+			BaseDeploymentGenerator: kubectl.BaseDeploymentGenerator{
 				Name:   deploymentName,
 				Images: imageNames,
 			},
 		}
 		return generator, true
 
-	case generateversioned.DeploymentBasicV1Beta1GeneratorName:
-		generator := &generateversioned.DeploymentBasicGeneratorV1{
-			BaseDeploymentGenerator: generateversioned.BaseDeploymentGenerator{
+	case cmdutil.DeploymentBasicV1Beta1GeneratorName:
+		generator := &kubectl.DeploymentBasicGeneratorV1{
+			BaseDeploymentGenerator: kubectl.BaseDeploymentGenerator{
 				Name:   deploymentName,
 				Images: imageNames,
 			},
@@ -113,7 +111,6 @@ func generatorFromName(
 	return nil, false
 }
 
-// Complete completes all the options
 func (o *DeploymentOpts) Complete(f cmdutil.Factory, cmd *cobra.Command, args []string) error {
 	name, err := NameFromCommandArgs(cmd, args)
 	if err != nil {
@@ -128,8 +125,8 @@ func (o *DeploymentOpts) Complete(f cmdutil.Factory, cmd *cobra.Command, args []
 	generatorName := cmdutil.GetFlagString(cmd, "generator")
 
 	if len(generatorName) == 0 {
-		generatorName = generateversioned.DeploymentBasicAppsV1GeneratorName
-		generatorNameTemp, err := generateversioned.FallbackGeneratorNameIfNecessary(generatorName, clientset.Discovery(), o.CreateSubcommandOptions.ErrOut)
+		generatorName = cmdutil.DeploymentBasicAppsV1GeneratorName
+		generatorNameTemp, err := cmdutil.FallbackGeneratorNameIfNecessary(generatorName, clientset.Discovery(), o.CreateSubcommandOptions.ErrOut)
 		if err != nil {
 			return err
 		}
@@ -149,7 +146,10 @@ func (o *DeploymentOpts) Complete(f cmdutil.Factory, cmd *cobra.Command, args []
 	return o.CreateSubcommandOptions.Complete(f, cmd, args, generator)
 }
 
-// Run performs the execution of 'create deployment' sub command
+// createDeployment
+// 1. Reads user config values from Cobra.
+// 2. Sets up the correct Generator object.
+// 3. Calls RunCreateSubcommand.
 func (o *DeploymentOpts) Run() error {
 	return o.CreateSubcommandOptions.Run()
 }

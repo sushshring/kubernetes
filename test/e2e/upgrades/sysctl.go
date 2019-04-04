@@ -19,10 +19,10 @@ package upgrades
 import (
 	"fmt"
 
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
@@ -32,7 +32,7 @@ import (
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
-// SysctlUpgradeTest tests that a pod with sysctls runs before and after an upgrade. During
+// SecretUpgradeTest tests that a pod with sysctls runs before and after an upgrade. During
 // a master upgrade, the exact pod is expected to stay running. A pod with unsafe sysctls is
 // expected to keep failing before and after the upgrade.
 type SysctlUpgradeTest struct {
@@ -52,20 +52,20 @@ func (t *SysctlUpgradeTest) Setup(f *framework.Framework) {
 func (t *SysctlUpgradeTest) Test(f *framework.Framework, done <-chan struct{}, upgrade UpgradeType) {
 	<-done
 	switch upgrade {
-	case MasterUpgrade, ClusterUpgrade:
-		ginkgo.By("Checking the safe sysctl pod keeps running on master upgrade")
+	case MasterUpgrade:
+		By("Checking the safe sysctl pod keeps running on master upgrade")
 		pod, err := f.ClientSet.CoreV1().Pods(t.validPod.Namespace).Get(t.validPod.Name, metav1.GetOptions{})
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		gomega.Expect(pod.Status.Phase).To(gomega.Equal(v1.PodRunning))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pod.Status.Phase).To(Equal(v1.PodRunning))
 	}
 
-	ginkgo.By("Checking the old unsafe sysctl pod was not suddenly started during an upgrade")
+	By("Checking the old unsafe sysctl pod was not suddenly started during an upgrade")
 	pod, err := f.ClientSet.CoreV1().Pods(t.invalidPod.Namespace).Get(t.invalidPod.Name, metav1.GetOptions{})
 	if err != nil && !errors.IsNotFound(err) {
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		Expect(err).NotTo(HaveOccurred())
 	}
 	if err == nil {
-		gomega.Expect(pod.Status.Phase).NotTo(gomega.Equal(v1.PodRunning))
+		Expect(pod.Status.Phase).NotTo(Equal(v1.PodRunning))
 	}
 
 	t.verifySafeSysctlWork(f)
@@ -78,15 +78,15 @@ func (t *SysctlUpgradeTest) Teardown(f *framework.Framework) {
 }
 
 func (t *SysctlUpgradeTest) verifySafeSysctlWork(f *framework.Framework) *v1.Pod {
-	ginkgo.By("Creating a pod with safe sysctls")
+	By("Creating a pod with safe sysctls")
 	safeSysctl := "net.ipv4.ip_local_port_range"
 	safeSysctlValue := "1024 1042"
 	validPod := sysctlTestPod("valid-sysctls", map[string]string{safeSysctl: safeSysctlValue})
 	validPod = f.PodClient().Create(t.validPod)
 
-	ginkgo.By("Making sure the valid pod launches")
+	By("Making sure the valid pod launches")
 	ev, err := f.PodClient().WaitForErrorEventOrSuccess(t.validPod)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	Expect(err).NotTo(HaveOccurred())
 	if ev != nil && ev.Reason == sysctl.UnsupportedReason {
 		framework.Skipf("No sysctl support in Docker <1.12")
 	}
@@ -96,19 +96,19 @@ func (t *SysctlUpgradeTest) verifySafeSysctlWork(f *framework.Framework) *v1.Pod
 }
 
 func (t *SysctlUpgradeTest) verifyUnsafeSysctlsAreRejected(f *framework.Framework) *v1.Pod {
-	ginkgo.By("Creating a pod with unsafe sysctls")
+	By("Creating a pod with unsafe sysctls")
 	invalidPod := sysctlTestPod("valid-sysctls-"+string(uuid.NewUUID()), map[string]string{
 		"fs.mount-max": "1000000",
 	})
 	invalidPod = f.PodClient().Create(invalidPod)
 
-	ginkgo.By("Making sure the invalid pod failed")
+	By("Making sure the invalid pod failed")
 	ev, err := f.PodClient().WaitForErrorEventOrSuccess(invalidPod)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	Expect(err).NotTo(HaveOccurred())
 	if ev != nil && ev.Reason == sysctl.UnsupportedReason {
 		framework.Skipf("No sysctl support in Docker <1.12")
 	}
-	gomega.Expect(ev.Reason).To(gomega.Equal(sysctl.ForbiddenReason))
+	Expect(ev.Reason).To(Equal(sysctl.ForbiddenReason))
 
 	return invalidPod
 }

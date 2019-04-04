@@ -31,11 +31,10 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/pkg/client/conditions"
 	"k8s.io/kubernetes/test/e2e/framework"
-	"k8s.io/kubernetes/test/e2e/storage/testsuites"
 	"k8s.io/kubernetes/test/e2e/storage/utils"
 )
 
-var _ = utils.SIGDescribe("Mounted volume expand", func() {
+var _ = utils.SIGDescribe("Mounted volume expand[Slow]", func() {
 	var (
 		c                 clientset.Interface
 		ns                string
@@ -73,20 +72,18 @@ var _ = utils.SIGDescribe("Mounted volume expand", func() {
 			isNodeLabeled = true
 		}
 
-		test := testsuites.StorageClassTest{
-			Name:                 "default",
-			ClaimSize:            "2Gi",
-			AllowVolumeExpansion: true,
-			DelayBinding:         true,
+		test := storageClassTest{
+			name:      "default",
+			claimSize: "2Gi",
 		}
-		resizableSc, err = createStorageClass(test, ns, "resizing", c)
-		framework.ExpectNoError(err, "Error creating resizable storage class")
+		resizableSc, err = createResizableStorageClass(test, ns, "resizing", c)
+		Expect(err).NotTo(HaveOccurred(), "Error creating resizable storage class")
 		Expect(*resizableSc.AllowVolumeExpansion).To(BeTrue())
 
 		pvc = newClaim(test, ns, "default")
 		pvc.Spec.StorageClassName = &resizableSc.Name
 		pvc, err = c.CoreV1().PersistentVolumeClaims(pvc.Namespace).Create(pvc)
-		framework.ExpectNoError(err, "Error creating pvc")
+		Expect(err).NotTo(HaveOccurred(), "Error creating pvc")
 	})
 
 	framework.AddCleanupAction(func() {
@@ -108,26 +105,21 @@ var _ = utils.SIGDescribe("Mounted volume expand", func() {
 	})
 
 	It("Should verify mounted devices can be resized", func() {
+		By("Waiting for PVC to be in bound phase")
 		pvcClaims := []*v1.PersistentVolumeClaim{pvc}
-
-		// The reason we use a node selector is because we do not want pod to move to different node when pod is deleted.
-		// Keeping pod on same node reproduces the scenario that volume might already be mounted when resize is attempted.
-		// We should consider adding a unit test that exercises this better.
-		By("Creating a deployment with selected PVC")
-		deployment, err := framework.CreateDeployment(c, int32(1), map[string]string{"test": "app"}, nodeKeyValueLabel, ns, pvcClaims, "")
-		framework.ExpectNoError(err, "Failed creating deployment %v", err)
-		defer c.AppsV1().Deployments(ns).Delete(deployment.Name, &metav1.DeleteOptions{})
-
-		// PVC should be bound at this point
-		By("Checking for bound PVC")
 		pvs, err := framework.WaitForPVClaimBoundPhase(c, pvcClaims, framework.ClaimProvisionTimeout)
-		framework.ExpectNoError(err, "Failed waiting for PVC to be bound %v", err)
+		Expect(err).NotTo(HaveOccurred(), "Failed waiting for PVC to be bound %v", err)
 		Expect(len(pvs)).To(Equal(1))
+
+		By("Creating a deployment with the provisioned volume")
+		deployment, err := framework.CreateDeployment(c, int32(1), map[string]string{"test": "app"}, nodeKeyValueLabel, ns, pvcClaims, "")
+		Expect(err).NotTo(HaveOccurred(), "Failed creating deployment %v", err)
+		defer c.AppsV1().Deployments(ns).Delete(deployment.Name, &metav1.DeleteOptions{})
 
 		By("Expanding current pvc")
 		newSize := resource.MustParse("6Gi")
 		pvc, err = expandPVCSize(pvc, newSize, c)
-		framework.ExpectNoError(err, "While updating pvc for more size")
+		Expect(err).NotTo(HaveOccurred(), "While updating pvc for more size")
 		Expect(pvc).NotTo(BeNil())
 
 		pvcSize := pvc.Spec.Resources.Requests[v1.ResourceStorage]
@@ -136,8 +128,8 @@ var _ = utils.SIGDescribe("Mounted volume expand", func() {
 		}
 
 		By("Waiting for cloudprovider resize to finish")
-		err = waitForControllerVolumeResize(pvc, c, totalResizeWaitPeriod)
-		framework.ExpectNoError(err, "While waiting for pvc resize to finish")
+		err = waitForControllerVolumeResize(pvc, c)
+		Expect(err).NotTo(HaveOccurred(), "While waiting for pvc resize to finish")
 
 		By("Getting a pod from deployment")
 		podList, err := framework.GetPodsForDeployment(c, deployment)
@@ -146,15 +138,15 @@ var _ = utils.SIGDescribe("Mounted volume expand", func() {
 
 		By("Deleting the pod from deployment")
 		err = framework.DeletePodWithWait(f, c, &pod)
-		framework.ExpectNoError(err, "while deleting pod for resizing")
+		Expect(err).NotTo(HaveOccurred(), "while deleting pod for resizing")
 
 		By("Waiting for deployment to create new pod")
 		pod, err = waitForDeploymentToRecreatePod(c, deployment)
-		framework.ExpectNoError(err, "While waiting for pod to be recreated")
+		Expect(err).NotTo(HaveOccurred(), "While waiting for pod to be recreated")
 
 		By("Waiting for file system resize to finish")
 		pvc, err = waitForFSResize(pvc, c)
-		framework.ExpectNoError(err, "while waiting for fs resize to finish")
+		Expect(err).NotTo(HaveOccurred(), "while waiting for fs resize to finish")
 
 		pvcConditions := pvc.Status.Conditions
 		Expect(len(pvcConditions)).To(Equal(0), "pvc should not have conditions")

@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes/fake"
 	core "k8s.io/client-go/testing"
+	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 )
 
 func TestEnableDynamicConfigForNode(t *testing.T) {
@@ -34,7 +35,7 @@ func TestEnableDynamicConfigForNode(t *testing.T) {
 		return true, &v1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   nodeName,
-				Labels: map[string]string{v1.LabelHostname: nodeName},
+				Labels: map[string]string{kubeletapis.LabelHostname: nodeName},
 			},
 			Spec: v1.NodeSpec{
 				ConfigSource: &v1.NodeConfigSource{

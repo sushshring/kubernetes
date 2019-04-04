@@ -17,8 +17,8 @@ limitations under the License.
 package upgrades
 
 import (
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 
 	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
@@ -35,10 +35,8 @@ type StatefulSetUpgradeTest struct {
 	set     *apps.StatefulSet
 }
 
-// Name returns the tracking name of the test.
 func (StatefulSetUpgradeTest) Name() string { return "[sig-apps] statefulset-upgrade" }
 
-// Skip returns true when this test can be skipped.
 func (StatefulSetUpgradeTest) Skip(upgCtx upgrades.UpgradeContext) bool {
 	minVersion := version.MustParseSemantic("1.5.0")
 
@@ -67,50 +65,50 @@ func (t *StatefulSetUpgradeTest) Setup(f *framework.Framework) {
 	t.tester = framework.NewStatefulSetTester(f.ClientSet)
 	t.tester.PauseNewPods(t.set)
 
-	ginkgo.By("Creating service " + headlessSvcName + " in namespace " + ns)
+	By("Creating service " + headlessSvcName + " in namespace " + ns)
 	_, err := f.ClientSet.CoreV1().Services(ns).Create(t.service)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	Expect(err).NotTo(HaveOccurred())
 
-	ginkgo.By("Creating statefulset " + ssName + " in namespace " + ns)
+	By("Creating statefulset " + ssName + " in namespace " + ns)
 	*(t.set.Spec.Replicas) = 3
 	_, err = f.ClientSet.AppsV1().StatefulSets(ns).Create(t.set)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	Expect(err).NotTo(HaveOccurred())
 
-	ginkgo.By("Saturating stateful set " + t.set.Name)
+	By("Saturating stateful set " + t.set.Name)
 	t.tester.Saturate(t.set)
 	t.verify()
 	t.restart()
 	t.verify()
 }
 
-// Test waits for the upgrade to complete and verifies the StatefulSet basic functionality
+// Waits for the upgrade to complete and verifies the StatefulSet basic functionality
 func (t *StatefulSetUpgradeTest) Test(f *framework.Framework, done <-chan struct{}, upgrade upgrades.UpgradeType) {
 	<-done
 	t.verify()
 }
 
-// Teardown deletes all StatefulSets
+// Deletes all StatefulSets
 func (t *StatefulSetUpgradeTest) Teardown(f *framework.Framework) {
 	framework.DeleteAllStatefulSets(f.ClientSet, t.set.Name)
 }
 
 func (t *StatefulSetUpgradeTest) verify() {
-	ginkgo.By("Verifying statefulset mounted data directory is usable")
+	By("Verifying statefulset mounted data directory is usable")
 	framework.ExpectNoError(t.tester.CheckMount(t.set, "/data"))
 
-	ginkgo.By("Verifying statefulset provides a stable hostname for each pod")
+	By("Verifying statefulset provides a stable hostname for each pod")
 	framework.ExpectNoError(t.tester.CheckHostname(t.set))
 
-	ginkgo.By("Verifying statefulset set proper service name")
+	By("Verifying statefulset set proper service name")
 	framework.ExpectNoError(t.tester.CheckServiceName(t.set, t.set.Spec.ServiceName))
 
 	cmd := "echo $(hostname) > /data/hostname; sync;"
-	ginkgo.By("Running " + cmd + " in all stateful pods")
+	By("Running " + cmd + " in all stateful pods")
 	framework.ExpectNoError(t.tester.ExecInStatefulPods(t.set, cmd))
 }
 
 func (t *StatefulSetUpgradeTest) restart() {
-	ginkgo.By("Restarting statefulset " + t.set.Name)
+	By("Restarting statefulset " + t.set.Name)
 	t.tester.Restart(t.set)
 	t.tester.WaitForRunningAndReady(*t.set.Spec.Replicas, t.set)
 }

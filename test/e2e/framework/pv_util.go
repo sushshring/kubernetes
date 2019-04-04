@@ -18,10 +18,17 @@ package framework
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/onsi/ginkgo"
-	v1 "k8s.io/api/core/v1"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/golang/glog"
+	. "github.com/onsi/ginkgo"
+	"google.golang.org/api/googleapi"
+	"k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,40 +36,38 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	clientset "k8s.io/client-go/kubernetes"
+	awscloud "k8s.io/kubernetes/pkg/cloudprovider/providers/aws"
+	gcecloud "k8s.io/kubernetes/pkg/cloudprovider/providers/gce"
 	"k8s.io/kubernetes/pkg/volume/util"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
 const (
-	pdRetryTimeout  = 5 * time.Minute
-	pdRetryPollTime = 5 * time.Second
-
-	// VolumeSelectorKey is the key for volume selector.
+	PDRetryTimeout    = 5 * time.Minute
+	PDRetryPollTime   = 5 * time.Second
 	VolumeSelectorKey = "e2e-pv-pool"
 )
 
 var (
-	// SELinuxLabel is common selinux labels.
+	// Common selinux labels
 	SELinuxLabel = &v1.SELinuxOptions{
 		Level: "s0:c0,c1"}
 )
 
-type pvval struct{}
-
-// PVMap is a map of all PVs used in the multi pv-pvc tests. The key is the PV's name, which is
+// Map of all PVs used in the multi pv-pvc tests. The key is the PV's name, which is
 // guaranteed to be unique. The value is {} (empty struct) since we're only interested
 // in the PV's name and if it is present. We must always Get the pv object before
 // referencing any of its values, eg its ClaimRef.
+type pvval struct{}
 type PVMap map[string]pvval
 
-type pvcval struct{}
-
-// PVCMap is a map of all PVCs used in the multi pv-pvc tests. The key is "namespace/pvc.Name". The
+// Map of all PVCs used in the multi pv-pvc tests. The key is "namespace/pvc.Name". The
 // value is {} (empty struct) since we're only interested in the PVC's name and if it is
 // present. We must always Get the pvc object before referencing any of its values, eg.
 // its VolumeName.
 // Note: It's unsafe to add keys to a map in a loop. Their insertion in the map is
 //   unpredictable and can result in the same key being iterated over again.
+type pvcval struct{}
 type PVCMap map[types.NamespacedName]pvcval
 
 // PersistentVolumeConfig is consumed by MakePersistentVolume() to generate a PV object
@@ -88,6 +93,7 @@ type PersistentVolumeConfig struct {
 // PersistentVolumeClaimConfig is consumed by MakePersistentVolumeClaim() to generate a PVC object.
 // AccessModes defaults to all modes (RWO, RWX, ROX) if left empty
 // (+optional) Annotations defines the PVC's annotations
+
 type PersistentVolumeClaimConfig struct {
 	AccessModes      []v1.PersistentVolumeAccessMode
 	Annotations      map[string]string
@@ -96,15 +102,7 @@ type PersistentVolumeClaimConfig struct {
 	VolumeMode       *v1.PersistentVolumeMode
 }
 
-// NodeSelection specifies where to run a pod, using a combination of fixed node name,
-// node selector and/or affinity.
-type NodeSelection struct {
-	Name     string
-	Selector map[string]string
-	Affinity *v1.Affinity
-}
-
-// PVPVCCleanup cleans up a pv and pvc in a single pv/pvc test case.
+// Clean up a pv and pvc in a single pv/pvc test case.
 // Note: delete errors are appended to []error so that we can attempt to delete both the pvc and pv.
 func PVPVCCleanup(c clientset.Interface, ns string, pv *v1.PersistentVolume, pvc *v1.PersistentVolumeClaim) []error {
 	var errs []error
@@ -128,7 +126,7 @@ func PVPVCCleanup(c clientset.Interface, ns string, pv *v1.PersistentVolume, pvc
 	return errs
 }
 
-// PVPVCMapCleanup Cleans up pvs and pvcs in multi-pv-pvc test cases. Entries found in the pv and claim maps are
+// Clean up pvs and pvcs in multi-pv-pvc test cases. Entries found in the pv and claim maps are
 // deleted as long as the Delete api call succeeds.
 // Note: delete errors are appended to []error so that as many pvcs and pvs as possible are deleted.
 func PVPVCMapCleanup(c clientset.Interface, ns string, pvols PVMap, claims PVCMap) []error {
@@ -154,7 +152,7 @@ func PVPVCMapCleanup(c clientset.Interface, ns string, pvols PVMap, claims PVCMa
 	return errs
 }
 
-// DeletePersistentVolume deletes the PV.
+// Delete the PV.
 func DeletePersistentVolume(c clientset.Interface, pvName string) error {
 	if c != nil && len(pvName) > 0 {
 		Logf("Deleting PersistentVolume %q", pvName)
@@ -166,7 +164,7 @@ func DeletePersistentVolume(c clientset.Interface, pvName string) error {
 	return nil
 }
 
-// DeletePersistentVolumeClaim deletes the Claim.
+// Delete the Claim
 func DeletePersistentVolumeClaim(c clientset.Interface, pvcName string, ns string) error {
 	if c != nil && len(pvcName) > 0 {
 		Logf("Deleting PersistentVolumeClaim %q", pvcName)
@@ -178,7 +176,7 @@ func DeletePersistentVolumeClaim(c clientset.Interface, pvcName string, ns strin
 	return nil
 }
 
-// DeletePVCandValidatePV deletes the PVC and waits for the PV to enter its expected phase. Validate that the PV
+// Delete the PVC and wait for the PV to enter its expected phase. Validate that the PV
 // has been reclaimed (assumption here about reclaimPolicy). Caller tells this func which
 // phase value to expect for the pv bound to the to-be-deleted claim.
 func DeletePVCandValidatePV(c clientset.Interface, ns string, pvc *v1.PersistentVolumeClaim, pv *v1.PersistentVolume, expectPVPhase v1.PersistentVolumePhase) error {
@@ -219,7 +217,7 @@ func DeletePVCandValidatePV(c clientset.Interface, ns string, pvc *v1.Persistent
 	return nil
 }
 
-// DeletePVCandValidatePVGroup wraps deletePVCandValidatePV() by calling the function in a loop over the PV map. Only bound PVs
+// Wraps deletePVCandValidatePV() by calling the function in a loop over the PV map. Only bound PVs
 // are deleted. Validates that the claim was deleted and the PV is in the expected Phase (Released,
 // Available, Bound).
 // Note: if there are more claims than pvs then some of the remaining claims may bind to just made
@@ -272,12 +270,12 @@ func createPV(c clientset.Interface, pv *v1.PersistentVolume) (*v1.PersistentVol
 	return pv, nil
 }
 
-// CreatePV creates the PV resource. Fails test on error.
+// create the PV resource. Fails test on error.
 func CreatePV(c clientset.Interface, pv *v1.PersistentVolume) (*v1.PersistentVolume, error) {
 	return createPV(c, pv)
 }
 
-// CreatePVC creates the PVC resource. Fails test on error.
+// create the PVC resource. Fails test on error.
 func CreatePVC(c clientset.Interface, ns string, pvc *v1.PersistentVolumeClaim) (*v1.PersistentVolumeClaim, error) {
 	pvc, err := c.CoreV1().PersistentVolumeClaims(ns).Create(pvc)
 	if err != nil {
@@ -286,7 +284,7 @@ func CreatePVC(c clientset.Interface, ns string, pvc *v1.PersistentVolumeClaim) 
 	return pvc, nil
 }
 
-// CreatePVCPV creates a PVC followed by the PV based on the passed in nfs-server ip and
+// Create a PVC followed by the PV based on the passed in nfs-server ip and
 // namespace. If the "preBind" bool is true then pre-bind the PV to the PVC
 // via the PV's ClaimRef. Return the pv and pvc to reflect the created objects.
 // Note: in the pre-bind case the real PVC name, which is generated, is not
@@ -303,7 +301,7 @@ func CreatePVCPV(c clientset.Interface, pvConfig PersistentVolumeConfig, pvcConf
 	// make the pv spec
 	pv := MakePersistentVolume(pvConfig)
 
-	ginkgo.By(fmt.Sprintf("Creating a PVC followed by a%s PV", preBindMsg))
+	By(fmt.Sprintf("Creating a PVC followed by a%s PV", preBindMsg))
 	pvc, err := CreatePVC(c, ns, pvc)
 	if err != nil {
 		return nil, nil, err
@@ -320,7 +318,7 @@ func CreatePVCPV(c clientset.Interface, pvConfig PersistentVolumeConfig, pvcConf
 	return pv, pvc, nil
 }
 
-// CreatePVPVC creates a PV followed by the PVC based on the passed in nfs-server ip and
+// Create a PV followed by the PVC based on the passed in nfs-server ip and
 // namespace. If the "preBind" bool is true then pre-bind the PVC to the PV
 // via the PVC's VolumeName. Return the pv and pvc to reflect the created
 // objects.
@@ -354,7 +352,7 @@ func CreatePVPVC(c clientset.Interface, pvConfig PersistentVolumeConfig, pvcConf
 	return pv, pvc, nil
 }
 
-// CreatePVsPVCs creates the desired number of PVs and PVCs and returns them in separate maps. If the
+// Create the desired number of PVs and PVCs and return them in separate maps. If the
 // number of PVs != the number of PVCs then the min of those two counts is the number of
 // PVs expected to bind. If a Create error occurs, the returned maps may contain pv and pvc
 // entries for the resources that were successfully created. In other words, when the caller
@@ -402,7 +400,7 @@ func CreatePVsPVCs(numpvs, numpvcs int, c clientset.Interface, ns string, pvConf
 	return pvMap, pvcMap, nil
 }
 
-// WaitOnPVandPVC waits for the pv and pvc to bind to each other.
+// Wait for the pv and pvc to bind to each other.
 func WaitOnPVandPVC(c clientset.Interface, ns string, pv *v1.PersistentVolume, pvc *v1.PersistentVolumeClaim) error {
 	// Wait for newly created PVC to bind to the PV
 	Logf("Waiting for PV %v to bind to PVC %v", pv.Name, pvc.Name)
@@ -445,7 +443,7 @@ func WaitOnPVandPVC(c clientset.Interface, ns string, pv *v1.PersistentVolume, p
 	return nil
 }
 
-// WaitAndVerifyBinds searches for bound PVs and PVCs by examining pvols for non-nil claimRefs.
+// Search for bound PVs and PVCs by examining pvols for non-nil claimRefs.
 // NOTE: Each iteration waits for a maximum of 3 minutes per PV and, if the PV is bound,
 //   up to 3 minutes for the PVC. When the number of PVs != number of PVCs, this can lead
 //   to situations where the maximum wait times are reached several times in succession,
@@ -498,7 +496,7 @@ func WaitAndVerifyBinds(c clientset.Interface, ns string, pvols PVMap, claims PV
 
 // Test the pod's exit code to be zero.
 func testPodSuccessOrFail(c clientset.Interface, ns string, pod *v1.Pod) error {
-	ginkgo.By("Pod should terminate with exitcode 0 (success)")
+	By("Pod should terminate with exitcode 0 (success)")
 	if err := WaitForPodSuccessInNamespace(c, pod.Name, ns); err != nil {
 		return fmt.Errorf("pod %q failed to reach Success: %v", pod.Name, err)
 	}
@@ -506,7 +504,7 @@ func testPodSuccessOrFail(c clientset.Interface, ns string, pod *v1.Pod) error {
 	return nil
 }
 
-// DeletePodWithWait deletes the passed-in pod and waits for the pod to be terminated. Resilient to the pod
+// Deletes the passed-in pod and waits for the pod to be terminated. Resilient to the pod
 // not existing.
 func DeletePodWithWait(f *Framework, c clientset.Interface, pod *v1.Pod) error {
 	if pod == nil {
@@ -515,9 +513,10 @@ func DeletePodWithWait(f *Framework, c clientset.Interface, pod *v1.Pod) error {
 	return DeletePodWithWaitByName(f, c, pod.GetName(), pod.GetNamespace())
 }
 
-// DeletePodWithWaitByName deletes the named and namespaced pod and waits for the pod to be terminated. Resilient to the pod
+// Deletes the named and namespaced pod and waits for the pod to be terminated. Resilient to the pod
 // not existing.
 func DeletePodWithWaitByName(f *Framework, c clientset.Interface, podName, podNamespace string) error {
+	const maxWait = 5 * time.Minute
 	Logf("Deleting pod %q in namespace %q", podName, podNamespace)
 	err := c.CoreV1().Pods(podNamespace).Delete(podName, nil)
 	if err != nil {
@@ -526,15 +525,15 @@ func DeletePodWithWaitByName(f *Framework, c clientset.Interface, podName, podNa
 		}
 		return fmt.Errorf("pod Delete API error: %v", err)
 	}
-	Logf("Wait up to %v for pod %q to be fully deleted", PodDeleteTimeout, podName)
-	err = f.WaitForPodNotFound(podName, PodDeleteTimeout)
+	Logf("Wait up to %v for pod %q to be fully deleted", maxWait, podName)
+	err = f.WaitForPodNotFound(podName, maxWait)
 	if err != nil {
 		return fmt.Errorf("pod %q was not deleted: %v", podName, err)
 	}
 	return nil
 }
 
-// CreateWaitAndDeletePod creates the test pod, wait for (hopefully) success, and then delete the pod.
+// Create the test pod, wait for (hopefully) success, and then delete the pod.
 // Note: need named return value so that the err assignment in the defer sets the returned error.
 //       Has been shown to be necessary using Go 1.7.
 func CreateWaitAndDeletePod(f *Framework, c clientset.Interface, ns string, pvc *v1.PersistentVolumeClaim) (err error) {
@@ -558,12 +557,25 @@ func CreateWaitAndDeletePod(f *Framework, c clientset.Interface, ns string, pvc 
 	return // note: named return value
 }
 
+// Sanity check for GCE testing.  Verify the persistent disk attached to the node.
+func VerifyGCEDiskAttached(diskName string, nodeName types.NodeName) (bool, error) {
+	gceCloud, err := GetGCECloud()
+	if err != nil {
+		return false, fmt.Errorf("GetGCECloud error: %v", err)
+	}
+	isAttached, err := gceCloud.DiskIsAttached(diskName, nodeName)
+	if err != nil {
+		return false, fmt.Errorf("cannot verify if GCE disk is attached: %v", err)
+	}
+	return isAttached, nil
+}
+
 // Return a pvckey struct.
 func makePvcKey(ns, name string) types.NamespacedName {
 	return types.NamespacedName{Namespace: ns, Name: name}
 }
 
-// MakePersistentVolume returns a PV definition based on the nfs server IP. If the PVC is not nil
+// Returns a PV definition based on the nfs server IP. If the PVC is not nil
 // then the PV is defined with a ClaimRef which includes the PVC's namespace.
 // If the PVC is nil then the PV is not defined with a ClaimRef.  If no reclaimPolicy
 // is assigned, assumes "Retain". Specs are expected to match the test's PVC.
@@ -610,7 +622,7 @@ func MakePersistentVolume(pvConfig PersistentVolumeConfig) *v1.PersistentVolume 
 	}
 }
 
-// MakePersistentVolumeClaim returns a PVC definition based on the namespace.
+// Returns a PVC definition based on the namespace.
 // Note: if this PVC is intended to be pre-bound to a PV, whose name is not
 //   known until the PV is instantiated, then the func CreatePVPVC will add
 //   pvc.Spec.VolumeName to this claim.
@@ -644,7 +656,7 @@ func MakePersistentVolumeClaim(cfg PersistentVolumeClaimConfig, ns string) *v1.P
 
 func createPDWithRetry(zone string) (string, error) {
 	var err error
-	for start := time.Now(); time.Since(start) < pdRetryTimeout; time.Sleep(pdRetryPollTime) {
+	for start := time.Now(); time.Since(start) < PDRetryTimeout; time.Sleep(PDRetryPollTime) {
 		newDiskName, err := createPD(zone)
 		if err != nil {
 			Logf("Couldn't create a new PD, sleeping 5 seconds: %v", err)
@@ -656,23 +668,20 @@ func createPDWithRetry(zone string) (string, error) {
 	return "", err
 }
 
-// CreatePDWithRetry creates PD with retry.
 func CreatePDWithRetry() (string, error) {
 	return createPDWithRetry("")
 }
 
-// CreatePDWithRetryAndZone creates PD on zone with retry.
 func CreatePDWithRetryAndZone(zone string) (string, error) {
 	return createPDWithRetry(zone)
 }
 
-// DeletePDWithRetry deletes PD with retry.
 func DeletePDWithRetry(diskName string) error {
 	var err error
-	for start := time.Now(); time.Since(start) < pdRetryTimeout; time.Sleep(pdRetryPollTime) {
+	for start := time.Now(); time.Since(start) < PDRetryTimeout; time.Sleep(PDRetryPollTime) {
 		err = deletePD(diskName)
 		if err != nil {
-			Logf("Couldn't delete PD %q, sleeping %v: %v", diskName, pdRetryPollTime, err)
+			Logf("Couldn't delete PD %q, sleeping %v: %v", diskName, PDRetryPollTime, err)
 			continue
 		}
 		Logf("Successfully deleted PD %q.", diskName)
@@ -681,24 +690,140 @@ func DeletePDWithRetry(diskName string) error {
 	return fmt.Errorf("unable to delete PD %q: %v", diskName, err)
 }
 
+func newAWSClient(zone string) *ec2.EC2 {
+	var cfg *aws.Config
+
+	if zone == "" {
+		zone = TestContext.CloudConfig.Zone
+	}
+	if zone == "" {
+		glog.Warning("No AWS zone configured!")
+		cfg = nil
+	} else {
+		region := zone[:len(zone)-1]
+		cfg = &aws.Config{Region: aws.String(region)}
+	}
+	return ec2.New(session.New(), cfg)
+}
+
 func createPD(zone string) (string, error) {
 	if zone == "" {
 		zone = TestContext.CloudConfig.Zone
 	}
-	return TestContext.CloudConfig.Provider.CreatePD(zone)
+
+	if TestContext.Provider == "gce" || TestContext.Provider == "gke" {
+		pdName := fmt.Sprintf("%s-%s", TestContext.Prefix, string(uuid.NewUUID()))
+
+		gceCloud, err := GetGCECloud()
+		if err != nil {
+			return "", err
+		}
+
+		if zone == "" && TestContext.CloudConfig.MultiZone {
+			zones, err := gceCloud.GetAllZonesFromCloudProvider()
+			if err != nil {
+				return "", err
+			}
+			zone, _ = zones.PopAny()
+		}
+
+		tags := map[string]string{}
+		err = gceCloud.CreateDisk(pdName, gcecloud.DiskTypeStandard, zone, 2 /* sizeGb */, tags)
+		if err != nil {
+			return "", err
+		}
+		return pdName, nil
+	} else if TestContext.Provider == "aws" {
+		client := newAWSClient(zone)
+		request := &ec2.CreateVolumeInput{}
+		request.AvailabilityZone = aws.String(zone)
+		request.Size = aws.Int64(10)
+		request.VolumeType = aws.String(awscloud.DefaultVolumeType)
+		response, err := client.CreateVolume(request)
+		if err != nil {
+			return "", err
+		}
+
+		az := aws.StringValue(response.AvailabilityZone)
+		awsID := aws.StringValue(response.VolumeId)
+
+		volumeName := "aws://" + az + "/" + awsID
+		return volumeName, nil
+	} else if TestContext.Provider == "azure" {
+		pdName := fmt.Sprintf("%s-%s", TestContext.Prefix, string(uuid.NewUUID()))
+		azureCloud, err := GetAzureCloud()
+
+		if err != nil {
+			return "", err
+		}
+
+		_, diskURI, _, err := azureCloud.CreateVolume(pdName, "" /* account */, "" /* sku */, "" /* location */, 1 /* sizeGb */)
+		if err != nil {
+			return "", err
+		}
+		return diskURI, nil
+	} else {
+		return "", fmt.Errorf("provider does not support volume creation")
+	}
 }
 
 func deletePD(pdName string) error {
-	return TestContext.CloudConfig.Provider.DeletePD(pdName)
+	if TestContext.Provider == "gce" || TestContext.Provider == "gke" {
+		gceCloud, err := GetGCECloud()
+		if err != nil {
+			return err
+		}
+
+		err = gceCloud.DeleteDisk(pdName)
+
+		if err != nil {
+			if gerr, ok := err.(*googleapi.Error); ok && len(gerr.Errors) > 0 && gerr.Errors[0].Reason == "notFound" {
+				// PD already exists, ignore error.
+				return nil
+			}
+
+			Logf("error deleting PD %q: %v", pdName, err)
+		}
+		return err
+	} else if TestContext.Provider == "aws" {
+		client := newAWSClient("")
+
+		tokens := strings.Split(pdName, "/")
+		awsVolumeID := tokens[len(tokens)-1]
+
+		request := &ec2.DeleteVolumeInput{VolumeId: aws.String(awsVolumeID)}
+		_, err := client.DeleteVolume(request)
+		if err != nil {
+			if awsError, ok := err.(awserr.Error); ok && awsError.Code() == "InvalidVolume.NotFound" {
+				Logf("volume deletion implicitly succeeded because volume %q does not exist.", pdName)
+			} else {
+				return fmt.Errorf("error deleting EBS volumes: %v", err)
+			}
+		}
+		return nil
+	} else if TestContext.Provider == "azure" {
+		azureCloud, err := GetAzureCloud()
+		if err != nil {
+			return err
+		}
+		err = azureCloud.DeleteVolume(pdName)
+		if err != nil {
+			Logf("failed to delete Azure volume %q: %v", pdName, err)
+			return err
+		}
+		return nil
+	} else {
+		return fmt.Errorf("provider does not support volume deletion")
+	}
 }
 
-// MakeWritePod returns a pod definition based on the namespace. The pod references the PVC's
+// Returns a pod definition based on the namespace. The pod references the PVC's
 // name.
 func MakeWritePod(ns string, pvc *v1.PersistentVolumeClaim) *v1.Pod {
 	return MakePod(ns, nil, []*v1.PersistentVolumeClaim{pvc}, true, "touch /mnt/volume1/SUCCESS && (id -G | grep -E '\\b777\\b')")
 }
 
-// MakePod returns a pod definition based on the namespace. The pod references the PVC's
+// Returns a pod definition based on the namespace. The pod references the PVC's
 // name.  A slice of BASH commands can be supplied as args to be run by the pod
 func MakePod(ns string, nodeSelector map[string]string, pvclaims []*v1.PersistentVolumeClaim, isPrivileged bool, command string) *v1.Pod {
 	if len(command) == 0 {
@@ -743,8 +868,8 @@ func MakePod(ns string, nodeSelector map[string]string, pvclaims []*v1.Persisten
 	return podSpec
 }
 
-// makeNginxPod returns a pod definition based on the namespace using nginx image
-func makeNginxPod(ns string, nodeSelector map[string]string, pvclaims []*v1.PersistentVolumeClaim) *v1.Pod {
+// Returns a pod definition based on the namespace using nginx image
+func MakeNginxPod(ns string, nodeSelector map[string]string, pvclaims []*v1.PersistentVolumeClaim) *v1.Pod {
 	podSpec := &v1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Pod",
@@ -784,7 +909,7 @@ func makeNginxPod(ns string, nodeSelector map[string]string, pvclaims []*v1.Pers
 	return podSpec
 }
 
-// MakeSecPod returns a pod definition based on the namespace. The pod references the PVC's
+// Returns a pod definition based on the namespace. The pod references the PVC's
 // name.  A slice of BASH commands can be supplied as args to be run by the pod.
 // SELinux testing requires to pass HostIPC and HostPID as booleansi arguments.
 func MakeSecPod(ns string, pvclaims []*v1.PersistentVolumeClaim, isPrivileged bool, command string, hostIPC bool, hostPID bool, seLinuxLabel *v1.SELinuxOptions, fsGroup *int64) *v1.Pod {
@@ -866,9 +991,8 @@ func CreatePod(client clientset.Interface, namespace string, nodeSelector map[st
 	return pod, nil
 }
 
-// CreateNginxPod creates an enginx pod.
 func CreateNginxPod(client clientset.Interface, namespace string, nodeSelector map[string]string, pvclaims []*v1.PersistentVolumeClaim) (*v1.Pod, error) {
-	pod := makeNginxPod(namespace, nodeSelector, pvclaims)
+	pod := MakeNginxPod(namespace, nodeSelector, pvclaims)
 	pod, err := client.CoreV1().Pods(namespace).Create(pod)
 	if err != nil {
 		return nil, fmt.Errorf("pod Create API error: %v", err)
@@ -886,23 +1010,20 @@ func CreateNginxPod(client clientset.Interface, namespace string, nodeSelector m
 	return pod, nil
 }
 
-// CreateSecPod creates security pod with given claims
+// create security pod with given claims
 func CreateSecPod(client clientset.Interface, namespace string, pvclaims []*v1.PersistentVolumeClaim, isPrivileged bool, command string, hostIPC bool, hostPID bool, seLinuxLabel *v1.SELinuxOptions, fsGroup *int64, timeout time.Duration) (*v1.Pod, error) {
-	return CreateSecPodWithNodeSelection(client, namespace, pvclaims, isPrivileged, command, hostIPC, hostPID, seLinuxLabel, fsGroup, NodeSelection{}, timeout)
+	return CreateSecPodWithNodeName(client, namespace, pvclaims, isPrivileged, command, hostIPC, hostPID, seLinuxLabel, fsGroup, "", timeout)
 }
 
-// CreateSecPodWithNodeSelection creates security pod with given claims
-func CreateSecPodWithNodeSelection(client clientset.Interface, namespace string, pvclaims []*v1.PersistentVolumeClaim, isPrivileged bool, command string, hostIPC bool, hostPID bool, seLinuxLabel *v1.SELinuxOptions, fsGroup *int64, node NodeSelection, timeout time.Duration) (*v1.Pod, error) {
+// create security pod with given claims
+func CreateSecPodWithNodeName(client clientset.Interface, namespace string, pvclaims []*v1.PersistentVolumeClaim, isPrivileged bool, command string, hostIPC bool, hostPID bool, seLinuxLabel *v1.SELinuxOptions, fsGroup *int64, nodeName string, timeout time.Duration) (*v1.Pod, error) {
 	pod := MakeSecPod(namespace, pvclaims, isPrivileged, command, hostIPC, hostPID, seLinuxLabel, fsGroup)
-	// Setting node
-	pod.Spec.NodeName = node.Name
-	pod.Spec.NodeSelector = node.Selector
-	pod.Spec.Affinity = node.Affinity
-
 	pod, err := client.CoreV1().Pods(namespace).Create(pod)
 	if err != nil {
 		return nil, fmt.Errorf("pod Create API error: %v", err)
 	}
+	// Setting nodeName
+	pod.Spec.NodeName = nodeName
 
 	// Waiting for pod to be running
 	err = WaitTimeoutForPodRunningInNamespace(client, pod.Name, namespace, timeout)
@@ -917,45 +1038,7 @@ func CreateSecPodWithNodeSelection(client clientset.Interface, namespace string,
 	return pod, nil
 }
 
-// SetNodeAffinityRequirement sets affinity with specified operator to nodeName to nodeSelection
-func SetNodeAffinityRequirement(nodeSelection *NodeSelection, operator v1.NodeSelectorOperator, nodeName string) {
-	// Add node-anti-affinity.
-	if nodeSelection.Affinity == nil {
-		nodeSelection.Affinity = &v1.Affinity{}
-	}
-	if nodeSelection.Affinity.NodeAffinity == nil {
-		nodeSelection.Affinity.NodeAffinity = &v1.NodeAffinity{}
-	}
-	if nodeSelection.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-		nodeSelection.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &v1.NodeSelector{}
-	}
-	nodeSelection.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(nodeSelection.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms,
-		v1.NodeSelectorTerm{
-			// https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity warns
-			// that "the value of kubernetes.io/hostname may be the same as the Node name in some environments and a different value in other environments".
-			// So this might be cleaner:
-			// MatchFields: []v1.NodeSelectorRequirement{
-			// 	{Key: "name", Operator: v1.NodeSelectorOpNotIn, Values: []string{nodeName}},
-			// },
-			// However, "name", "Name", "ObjectMeta.Name" all got rejected with "not a valid field selector key".
-
-			MatchExpressions: []v1.NodeSelectorRequirement{
-				{Key: "kubernetes.io/hostname", Operator: operator, Values: []string{nodeName}},
-			},
-		})
-}
-
-// SetAffinity sets affinity to nodeName to nodeSelection
-func SetAffinity(nodeSelection *NodeSelection, nodeName string) {
-	SetNodeAffinityRequirement(nodeSelection, v1.NodeSelectorOpIn, nodeName)
-}
-
-// SetAntiAffinity sets anti-affinity to nodeName to nodeSelection
-func SetAntiAffinity(nodeSelection *NodeSelection, nodeName string) {
-	SetNodeAffinityRequirement(nodeSelection, v1.NodeSelectorOpNotIn, nodeName)
-}
-
-// CreateClientPod defines and creates a pod with a mounted PV.  Pod runs infinite loop until killed.
+// Define and create a pod with a mounted PV.  Pod runs infinite loop until killed.
 func CreateClientPod(c clientset.Interface, ns string, pvc *v1.PersistentVolumeClaim) (*v1.Pod, error) {
 	return CreatePod(c, ns, nil, []*v1.PersistentVolumeClaim{pvc}, true, "")
 }
@@ -980,7 +1063,7 @@ func CreateUnschedulablePod(client clientset.Interface, namespace string, nodeSe
 	return pod, nil
 }
 
-// WaitForPVClaimBoundPhase waits until all pvcs phase set to bound
+// wait until all pvcs phase set to bound
 func WaitForPVClaimBoundPhase(client clientset.Interface, pvclaims []*v1.PersistentVolumeClaim, timeout time.Duration) ([]*v1.PersistentVolume, error) {
 	persistentvolumes := make([]*v1.PersistentVolume, len(pvclaims))
 
@@ -1003,29 +1086,38 @@ func WaitForPVClaimBoundPhase(client clientset.Interface, pvclaims []*v1.Persist
 	return persistentvolumes, nil
 }
 
-// CreatePVSource creates a PV source.
 func CreatePVSource(zone string) (*v1.PersistentVolumeSource, error) {
 	diskName, err := CreatePDWithRetryAndZone(zone)
 	if err != nil {
 		return nil, err
 	}
-	return TestContext.CloudConfig.Provider.CreatePVSource(zone, diskName)
-}
 
-// DeletePVSource deletes a PV source.
-func DeletePVSource(pvSource *v1.PersistentVolumeSource) error {
-	return TestContext.CloudConfig.Provider.DeletePVSource(pvSource)
-}
-
-// GetBoundPV returns a PV details.
-func GetBoundPV(client clientset.Interface, pvc *v1.PersistentVolumeClaim) (*v1.PersistentVolume, error) {
-	// Get new copy of the claim
-	claim, err := client.CoreV1().PersistentVolumeClaims(pvc.Namespace).Get(pvc.Name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
+	if TestContext.Provider == "gce" || TestContext.Provider == "gke" {
+		return &v1.PersistentVolumeSource{
+			GCEPersistentDisk: &v1.GCEPersistentDiskVolumeSource{
+				PDName:   diskName,
+				FSType:   "ext3",
+				ReadOnly: false,
+			},
+		}, nil
+	} else if TestContext.Provider == "aws" {
+		return &v1.PersistentVolumeSource{
+			AWSElasticBlockStore: &v1.AWSElasticBlockStoreVolumeSource{
+				VolumeID: diskName,
+				FSType:   "ext3",
+			},
+		}, nil
+	} else {
+		return nil, fmt.Errorf("Provider not supported")
 	}
+}
 
-	// Get the bound PV
-	pv, err := client.CoreV1().PersistentVolumes().Get(claim.Spec.VolumeName, metav1.GetOptions{})
-	return pv, err
+func DeletePVSource(pvSource *v1.PersistentVolumeSource) error {
+	if TestContext.Provider == "gce" || TestContext.Provider == "gke" {
+		return DeletePDWithRetry(pvSource.GCEPersistentDisk.PDName)
+	} else if TestContext.Provider == "aws" {
+		return DeletePDWithRetry(pvSource.AWSElasticBlockStore.VolumeID)
+	} else {
+		return fmt.Errorf("Provider not supported")
+	}
 }

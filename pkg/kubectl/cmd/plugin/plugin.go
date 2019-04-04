@@ -17,7 +17,6 @@ limitations under the License.
 package plugin
 
 import (
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -27,21 +26,21 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/klog"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/kubectl/util/templates"
 )
 
 var (
-	pluginLong = templates.LongDesc(`
+	plugin_long = templates.LongDesc(`
 		Provides utilities for interacting with plugins.
 
 		Plugins provide extended functionality that is not part of the major command-line distribution.
 		Please refer to the documentation and examples for more information about how write your own plugins.`)
 
-	pluginListLong = templates.LongDesc(`
+	plugin_list_long = templates.LongDesc(`
 		List all available plugin files on a user's PATH.
 
 		Available plugin files are those that are:
@@ -49,8 +48,6 @@ var (
 		- anywhere on the user's PATH
 		- begin with "kubectl-"
 `)
-
-	ValidPluginFilenamePrefixes = []string{"kubectl"}
 )
 
 func NewCmdPlugin(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra.Command {
@@ -58,7 +55,7 @@ func NewCmdPlugin(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra
 		Use:                   "plugin [flags]",
 		DisableFlagsInUseLine: true,
 		Short:                 i18n.T("Provides utilities for interacting with plugins."),
-		Long:                  pluginLong,
+		Long:                  plugin_long,
 		Run: func(cmd *cobra.Command, args []string) {
 			cmdutil.DefaultSubCommandRun(streams.ErrOut)(cmd, args)
 		},
@@ -72,8 +69,6 @@ type PluginListOptions struct {
 	Verifier PathVerifier
 	NameOnly bool
 
-	PluginPaths []string
-
 	genericclioptions.IOStreams
 }
 
@@ -86,7 +81,7 @@ func NewCmdPluginList(f cmdutil.Factory, streams genericclioptions.IOStreams) *c
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "list all visible plugin executables on a user's PATH",
-		Long:  pluginListLong,
+		Long:  plugin_list_long,
 		Run: func(cmd *cobra.Command, args []string) {
 			cmdutil.CheckErr(o.Complete(cmd))
 			cmdutil.CheckErr(o.Run())
@@ -102,26 +97,22 @@ func (o *PluginListOptions) Complete(cmd *cobra.Command) error {
 		root:        cmd.Root(),
 		seenPlugins: make(map[string]string, 0),
 	}
-
-	o.PluginPaths = filepath.SplitList(os.Getenv("PATH"))
 	return nil
 }
 
 func (o *PluginListOptions) Run() error {
+	path := "PATH"
+	if runtime.GOOS == "windows" {
+		path = "path"
+	}
+
 	pluginsFound := false
 	isFirstFile := true
-	pluginErrors := []error{}
 	pluginWarnings := 0
-
-	for _, dir := range uniquePathsList(o.PluginPaths) {
+	paths := sets.NewString(filepath.SplitList(os.Getenv(path))...)
+	for _, dir := range paths.List() {
 		files, err := ioutil.ReadDir(dir)
 		if err != nil {
-			if _, ok := err.(*os.PathError); ok && strings.Contains(err.Error(), "no such file") {
-				klog.V(3).Infof("unable to find directory %q in your PATH. Skipping...", dir)
-				continue
-			}
-
-			pluginErrors = append(pluginErrors, fmt.Errorf("error: unable to read directory %q in your PATH: %v", dir, err))
 			continue
 		}
 
@@ -129,12 +120,12 @@ func (o *PluginListOptions) Run() error {
 			if f.IsDir() {
 				continue
 			}
-			if !hasValidPrefix(f.Name(), ValidPluginFilenamePrefixes) {
+			if !strings.HasPrefix(f.Name(), "kubectl-") {
 				continue
 			}
 
 			if isFirstFile {
-				fmt.Fprintf(o.ErrOut, "The following compatible plugins are available:\n\n")
+				fmt.Fprintf(o.ErrOut, "The following kubectl-compatible plugins are available:\n\n")
 				pluginsFound = true
 				isFirstFile = false
 			}
@@ -155,23 +146,15 @@ func (o *PluginListOptions) Run() error {
 	}
 
 	if !pluginsFound {
-		pluginErrors = append(pluginErrors, fmt.Errorf("error: unable to find any kubectl plugins in your PATH"))
+		return fmt.Errorf("error: unable to find any kubectl plugins in your PATH")
 	}
 
 	if pluginWarnings > 0 {
-		if pluginWarnings == 1 {
-			pluginErrors = append(pluginErrors, fmt.Errorf("error: one plugin warning was found"))
-		} else {
-			pluginErrors = append(pluginErrors, fmt.Errorf("error: %v plugin warnings were found", pluginWarnings))
-		}
-	}
-	if len(pluginErrors) > 0 {
 		fmt.Fprintln(o.ErrOut)
-		errs := bytes.NewBuffer(nil)
-		for _, e := range pluginErrors {
-			fmt.Fprintln(errs, e)
+		if pluginWarnings == 1 {
+			return fmt.Errorf("one plugin warning was found")
 		}
-		return fmt.Errorf("%s", errs.String())
+		return fmt.Errorf("%v plugin warnings were found", pluginWarnings)
 	}
 
 	return nil
@@ -234,10 +217,7 @@ func isExecutable(fullPath string) (bool, error) {
 	}
 
 	if runtime.GOOS == "windows" {
-		fileExt := strings.ToLower(filepath.Ext(fullPath))
-
-		switch fileExt {
-		case ".bat", ".cmd", ".com", ".exe", ".ps1":
+		if strings.HasSuffix(info.Name(), ".exe") {
 			return true, nil
 		}
 		return false, nil
@@ -248,29 +228,4 @@ func isExecutable(fullPath string) (bool, error) {
 	}
 
 	return false, nil
-}
-
-// uniquePathsList deduplicates a given slice of strings without
-// sorting or otherwise altering its order in any way.
-func uniquePathsList(paths []string) []string {
-	seen := map[string]bool{}
-	newPaths := []string{}
-	for _, p := range paths {
-		if seen[p] {
-			continue
-		}
-		seen[p] = true
-		newPaths = append(newPaths, p)
-	}
-	return newPaths
-}
-
-func hasValidPrefix(filepath string, validPrefixes []string) bool {
-	for _, prefix := range validPrefixes {
-		if !strings.HasPrefix(filepath, prefix+"-") {
-			continue
-		}
-		return true
-	}
-	return false
 }

@@ -21,7 +21,7 @@ import (
 	"net"
 	"time"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -121,7 +121,7 @@ func listNodes(kubeClient clientset.Interface) (*v1.NodeList, error) {
 			LabelSelector: labels.Everything().String(),
 		})
 		if err != nil {
-			klog.Errorf("Failed to list all nodes: %v", err)
+			glog.Errorf("Failed to list all nodes: %v", err)
 			return false, nil
 		}
 		return true, nil

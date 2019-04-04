@@ -66,7 +66,7 @@ type NamespaceOptions struct {
 // NewNamespaceOptions provides an instance of NamespaceOptions with default values
 func NewNamespaceOptions(streams genericclioptions.IOStreams) *NamespaceOptions {
 	return &NamespaceOptions{
-		configFlags: genericclioptions.NewConfigFlags(true),
+		configFlags: genericclioptions.NewConfigFlags(),
 
 		IOStreams: streams,
 	}

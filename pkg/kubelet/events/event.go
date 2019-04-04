@@ -49,11 +49,13 @@ const (
 	StartingKubelet                      = "Starting"
 	KubeletSetupFailed                   = "KubeletSetupFailed"
 	FailedAttachVolume                   = "FailedAttachVolume"
+	FailedDetachVolume                   = "FailedDetachVolume"
 	FailedMountVolume                    = "FailedMount"
 	VolumeResizeFailed                   = "VolumeResizeFailed"
 	VolumeResizeSuccess                  = "VolumeResizeSuccessful"
 	FileSystemResizeFailed               = "FileSystemResizeFailed"
 	FileSystemResizeSuccess              = "FileSystemResizeSuccessful"
+	FailedUnMountVolume                  = "FailedUnMount"
 	FailedMapVolume                      = "FailedMapVolume"
 	FailedUnmapDevice                    = "FailedUnmapDevice"
 	WarnAlreadyMountedVolume             = "AlreadyMountedVolume"
@@ -80,8 +82,7 @@ const (
 	FreeDiskSpaceFailed = "FreeDiskSpaceFailed"
 
 	// Probe event reason list
-	ContainerUnhealthy    = "Unhealthy"
-	ContainerProbeWarning = "ProbeWarning"
+	ContainerUnhealthy = "Unhealthy"
 
 	// Pod worker event reason list
 	FailedSync = "FailedSync"

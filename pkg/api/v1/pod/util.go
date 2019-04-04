@@ -120,10 +120,6 @@ func VisitPodSecretNames(pod *v1.Pod, visitor Visitor) bool {
 			if source.StorageOS.SecretRef != nil && !visitor(source.StorageOS.SecretRef.Name) {
 				return false
 			}
-		case source.CSI != nil:
-			if source.CSI.NodePublishSecretRef != nil && !visitor(source.CSI.NodePublishSecretRef.Name) {
-				return false
-			}
 		}
 	}
 	return true

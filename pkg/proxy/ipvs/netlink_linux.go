@@ -30,12 +30,11 @@ import (
 
 type netlinkHandle struct {
 	netlink.Handle
-	isIPv6 bool
 }
 
-// NewNetLinkHandle will create a new NetLinkHandle
-func NewNetLinkHandle(isIPv6 bool) NetLinkHandle {
-	return &netlinkHandle{netlink.Handle{}, isIPv6}
+// NewNetLinkHandle will crate a new NetLinkHandle
+func NewNetLinkHandle() NetLinkHandle {
+	return &netlinkHandle{netlink.Handle{}}
 }
 
 // EnsureAddressBind checks if address is bound to the interface and, if not, binds it. If the address is already bound, return true.
@@ -182,11 +181,7 @@ func (h *netlinkHandle) GetLocalAddresses(dev, filterDev string) (sets.String, e
 		if route.LinkIndex == filterLinkIndex {
 			continue
 		}
-		if h.isIPv6 {
-			if route.Dst.IP.To4() == nil && !route.Dst.IP.IsLinkLocalUnicast() {
-				res.Insert(route.Dst.IP.String())
-			}
-		} else if route.Src != nil {
+		if route.Src != nil {
 			res.Insert(route.Src.String())
 		}
 	}

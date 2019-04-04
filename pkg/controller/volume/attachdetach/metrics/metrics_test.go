@@ -143,7 +143,7 @@ func TestTotalVolumesMetricCollection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	asw.AddVolumeNode(volumeName, volumeSpec, nodeName, "", true)
+	asw.AddVolumeNode(volumeName, volumeSpec, nodeName, "")
 
 	metricCollector := newAttachDetachStateCollector(
 		nil,

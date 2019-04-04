@@ -21,8 +21,8 @@ import (
 	"sort"
 	"strings"
 
+	apimachineryconfig "k8s.io/apimachinery/pkg/apis/config"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	componentbaseconfig "k8s.io/component-base/config"
 )
 
 // KubeProxyIPTablesConfiguration contains iptables-related configuration
@@ -55,9 +55,6 @@ type KubeProxyIPVSConfiguration struct {
 	// excludeCIDRs is a list of CIDR's which the ipvs proxier should not touch
 	// when cleaning up ipvs services.
 	ExcludeCIDRs []string
-	// strict ARP configure arp_ignore and arp_announce to avoid answering ARP queries
-	// from kube-ipvs0 interface
-	StrictARP bool
 }
 
 // KubeProxyConntrackConfiguration contains conntrack settings for
@@ -79,20 +76,6 @@ type KubeProxyConntrackConfiguration struct {
 	// in CLOSE_WAIT state will remain in the conntrack
 	// table. (e.g. '60s'). Must be greater than 0 to set.
 	TCPCloseWaitTimeout *metav1.Duration
-}
-
-// KubeProxyWinkernelConfiguration contains Windows/HNS settings for
-// the Kubernetes proxy server.
-type KubeProxyWinkernelConfiguration struct {
-	// networkName is the name of the network kube-proxy will use
-	// to create endpoints and policies
-	NetworkName string
-	// sourceVip is the IP address of the source VIP endoint used for
-	// NAT when loadbalancing
-	SourceVip string
-	// enableDSR tells kube-proxy whether HNS policies should be created
-	// with DSR
-	EnableDSR bool
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -125,7 +108,7 @@ type KubeProxyConfiguration struct {
 	HostnameOverride string
 	// clientConnection specifies the kubeconfig file and client connection settings for the proxy
 	// server to use when communicating with the apiserver.
-	ClientConnection componentbaseconfig.ClientConnectionConfiguration
+	ClientConnection apimachineryconfig.ClientConnectionConfiguration
 	// iptables contains iptables-related configuration options.
 	IPTables KubeProxyIPTablesConfiguration
 	// ipvs contains ipvs-related configuration options.
@@ -157,8 +140,6 @@ type KubeProxyConfiguration struct {
 	// If set it to a non-zero IP block, kube-proxy will filter that down to just the IPs that applied to the node.
 	// An empty string slice is meant to select all network interfaces.
 	NodePortAddresses []string
-	// winkernel contains winkernel-related configuration options.
-	Winkernel KubeProxyWinkernelConfiguration
 }
 
 // Currently, three modes of proxy are available in Linux platform: 'userspace' (older, going to be EOL), 'iptables'
@@ -191,7 +172,7 @@ type IPVSSchedulerMethod string
 const (
 	// RoundRobin distributes jobs equally amongst the available real servers.
 	RoundRobin IPVSSchedulerMethod = "rr"
-	// WeightedRoundRobin assigns jobs to real servers proportionally to their real servers' weight.
+	// WeightedRoundRobin assigns jobs to real servers proportionally to there real servers' weight.
 	// Servers with higher weights receive new jobs first and get more jobs than servers with lower weights.
 	// Servers with equal weights get an equal distribution of new jobs.
 	WeightedRoundRobin IPVSSchedulerMethod = "wrr"

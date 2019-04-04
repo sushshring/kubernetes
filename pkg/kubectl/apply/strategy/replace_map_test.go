@@ -33,7 +33,7 @@ var _ = Describe("Replacing fields of type map with openapi for some fields", fu
 	Context("where a field is has been updated", func() {
 		It("should update the field", func() {
 			recorded := create(`
-apiVersion: apps/v1
+apiVersion: extensions/v1beta1
 kind: ReplicaSet
 spec:
   template:
@@ -42,7 +42,7 @@ spec:
       image: image1
 `)
 			local := create(`
-apiVersion: apps/v1
+apiVersion: extensions/v1beta1
 kind: ReplicaSet
 spec:
   template:
@@ -51,7 +51,7 @@ spec:
       image: image1
 `)
 			remote := create(`
-apiVersion: apps/v1
+apiVersion: extensions/v1beta1
 kind: ReplicaSet
 spec:
   template:
@@ -64,7 +64,7 @@ spec:
       image: image3
 `)
 			expected := create(`
-apiVersion: apps/v1
+apiVersion: extensions/v1beta1
 kind: ReplicaSet
 spec:
   template:

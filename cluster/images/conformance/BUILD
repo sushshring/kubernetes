@@ -1,6 +1,4 @@
-load("@io_bazel_rules_docker//container:container.bzl", "container_layer")
-load("//build:platforms.bzl", "SERVER_PLATFORMS")
-load("//build:container.bzl", "multi_arch_container")
+load("@io_bazel_rules_docker//container:container.bzl", "container_bundle", "container_image", "container_layer")
 
 container_layer(
     name = "cluster-srcs",
@@ -14,24 +12,19 @@ container_layer(
     directory = "/usr/local/bin",
     files = [
         "//cmd/kubectl",
-        "//test/e2e:e2e.test_binary",
+        "//test/e2e:e2e.test",
         "//vendor/github.com/onsi/ginkgo/ginkgo",
     ],
 )
 
-multi_arch_container(
-    name = "conformance",
-    architectures = SERVER_PLATFORMS["linux"],
-    base = "@debian-hyperkube-base-{ARCH}//image",
+container_image(
+    name = "conformance-internal",
+    base = "@debian-hyperkube-base-amd64//image",
     cmd = [
         "/bin/bash",
         "-c",
         "/run_e2e.sh",
     ],
-    # {ARCH} is replaced by the macro, but STABLE_ vars are replaced by the
-    # build stamping, so we need to escape them
-    docker_push_tags = ["{{STABLE_DOCKER_PUSH_REGISTRY}}/conformance-{ARCH}:{{STABLE_DOCKER_TAG}}"],
-    docker_tags = ["{{STABLE_DOCKER_REGISTRY}}/conformance-{ARCH}:{{STABLE_DOCKER_TAG}}"],
     env = {
         "E2E_FOCUS": "\[Conformance\]",
         "E2E_SKIP": "",
@@ -48,9 +41,13 @@ multi_arch_container(
         ":bins",
     ],
     stamp = True,
-    tags = ["manual"],
-    visibility = ["//visibility:public"],
     workdir = "/usr/local/bin",
+)
+
+container_bundle(
+    name = "conformance",
+    images = {"k8s.gcr.io/conformance-amd64:{STABLE_DOCKER_TAG}": "conformance-internal"},
+    stamp = True,
 )
 
 filegroup(

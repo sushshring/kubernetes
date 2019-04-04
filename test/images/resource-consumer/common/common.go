@@ -16,13 +16,12 @@ limitations under the License.
 
 package common
 
-// Constants related to Prometheus metrics.
 const (
 	ConsumeCPUAddress       = "/ConsumeCPU"
 	ConsumeMemAddress       = "/ConsumeMem"
 	BumpMetricAddress       = "/BumpMetric"
 	GetCurrentStatusAddress = "/GetCurrentStatus"
-	MetricsAddress          = "/metrics"
+	MetricsAddress          = "/Metrics"
 
 	MillicoresQuery              = "millicores"
 	MegabytesQuery               = "megabytes"

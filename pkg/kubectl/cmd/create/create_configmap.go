@@ -20,9 +20,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/kubectl/generate"
-	generateversioned "k8s.io/kubernetes/pkg/kubectl/generate/versioned"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/kubectl/util/templates"
 )
@@ -57,12 +56,11 @@ var (
 		  kubectl create configmap my-config --from-env-file=path/to/bar.env`))
 )
 
-// ConfigMapOpts holds properties for create configmap sub-command
 type ConfigMapOpts struct {
 	CreateSubcommandOptions *CreateSubcommandOptions
 }
 
-// NewCmdCreateConfigMap initializes and returns ConfigMapOpts
+// ConfigMap is a command to ease creating ConfigMaps.
 func NewCmdCreateConfigMap(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command {
 	options := &ConfigMapOpts{
 		CreateSubcommandOptions: NewCreateSubcommandOptions(ioStreams),
@@ -85,7 +83,7 @@ func NewCmdCreateConfigMap(f cmdutil.Factory, ioStreams genericclioptions.IOStre
 
 	cmdutil.AddApplyAnnotationFlags(cmd)
 	cmdutil.AddValidateFlags(cmd)
-	cmdutil.AddGeneratorFlags(cmd, generateversioned.ConfigMapV1GeneratorName)
+	cmdutil.AddGeneratorFlags(cmd, cmdutil.ConfigMapV1GeneratorName)
 	cmd.Flags().StringSlice("from-file", []string{}, "Key file can be specified using its file path, in which case file basename will be used as configmap key, or optionally with a key and file path, in which case the given key will be used.  Specifying a directory will iterate each named file in the directory whose basename is a valid configmap key.")
 	cmd.Flags().StringArray("from-literal", []string{}, "Specify a key and literal value to insert in configmap (i.e. mykey=somevalue)")
 	cmd.Flags().String("from-env-file", "", "Specify the path to a file to read lines of key=val pairs to create a configmap (i.e. a Docker .env file).")
@@ -93,17 +91,16 @@ func NewCmdCreateConfigMap(f cmdutil.Factory, ioStreams genericclioptions.IOStre
 	return cmd
 }
 
-// Complete completes all the required options
 func (o *ConfigMapOpts) Complete(f cmdutil.Factory, cmd *cobra.Command, args []string) error {
 	name, err := NameFromCommandArgs(cmd, args)
 	if err != nil {
 		return err
 	}
 
-	var generator generate.StructuredGenerator
+	var generator kubectl.StructuredGenerator
 	switch generatorName := cmdutil.GetFlagString(cmd, "generator"); generatorName {
-	case generateversioned.ConfigMapV1GeneratorName:
-		generator = &generateversioned.ConfigMapGeneratorV1{
+	case cmdutil.ConfigMapV1GeneratorName:
+		generator = &kubectl.ConfigMapGeneratorV1{
 			Name:           name,
 			FileSources:    cmdutil.GetFlagStringSlice(cmd, "from-file"),
 			LiteralSources: cmdutil.GetFlagStringArray(cmd, "from-literal"),
@@ -117,7 +114,7 @@ func (o *ConfigMapOpts) Complete(f cmdutil.Factory, cmd *cobra.Command, args []s
 	return o.CreateSubcommandOptions.Complete(f, cmd, args, generator)
 }
 
-// Run performs the execution of 'create' sub command options
+// CreateConfigMap is the implementation of the create configmap command.
 func (o *ConfigMapOpts) Run() error {
 	return o.CreateSubcommandOptions.Run()
 }

@@ -27,7 +27,8 @@ import (
 )
 
 const (
-	defaultDockerEndpoint = "unix:///var/run/docker.sock"
+	defaultDockerEndpoint  = "unix:///var/run/docker.sock"
+	dockerDaemonConfigName = "/etc/docker/daemon.json"
 )
 
 // getDockerAPIVersion returns the Docker's API version.

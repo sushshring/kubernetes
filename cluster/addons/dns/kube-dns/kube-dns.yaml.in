@@ -56,7 +56,7 @@ metadata:
   labels:
     addonmanager.kubernetes.io/mode: EnsureExists
 ---
-apiVersion: apps/v1
+apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
   name: kube-dns
@@ -86,9 +86,6 @@ spec:
         seccomp.security.alpha.kubernetes.io/pod: 'docker/default'
     spec:
       priorityClassName: system-cluster-critical
-      securityContext:
-        supplementalGroups: [ 65534 ]
-        fsGroup: 65534
       tolerations:
       - key: "CriticalAddonsOnly"
         operator: "Exists"

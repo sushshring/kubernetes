@@ -1,9 +1,4 @@
-# See the OWNERS docs at https://go.k8s.io/owners
-
-approvers:
-- sig-auth-certificates-approvers
 reviewers:
-- sig-auth-certificates-reviewers
-labels:
-- sig/auth
-
+- deads2k
+- mikedanese
+- awly

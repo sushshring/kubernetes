@@ -26,10 +26,8 @@ import (
 	"github.com/google/cadvisor/container"
 	info "github.com/google/cadvisor/info/v1"
 	"github.com/google/cadvisor/utils"
-	"github.com/karrick/godirwalk"
-	"github.com/pkg/errors"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 func DebugInfo(watches map[string][]string) map[string][]string {
@@ -87,7 +85,7 @@ func GetSpec(cgroupPaths map[string]string, machineInfoFactory info.MachineInfoF
 			if quota != "" && quota != "-1" {
 				val, err := strconv.ParseUint(quota, 10, 64)
 				if err != nil {
-					klog.Errorf("GetSpec: Failed to parse CPUQuota from %q: %s", path.Join(cpuRoot, "cpu.cfs_quota_us"), err)
+					glog.Errorf("GetSpec: Failed to parse CPUQuota from %q: %s", path.Join(cpuRoot, "cpu.cfs_quota_us"), err)
 				}
 				spec.Cpu.Quota = val
 			}
@@ -134,7 +132,7 @@ func readString(dirpath string, file string) string {
 	if err != nil {
 		// Ignore non-existent files
 		if !os.IsNotExist(err) {
-			klog.Warningf("readString: Failed to read %q: %s", cgroupFile, err)
+			glog.Errorf("readString: Failed to read %q: %s", cgroupFile, err)
 		}
 		return ""
 	}
@@ -149,7 +147,7 @@ func readUInt64(dirpath string, file string) uint64 {
 
 	val, err := strconv.ParseUint(out, 10, 64)
 	if err != nil {
-		klog.Errorf("readUInt64: Failed to parse int %q from file %q: %s", out, path.Join(dirpath, file), err)
+		glog.Errorf("readUInt64: Failed to parse int %q from file %q: %s", out, path.Join(dirpath, file), err)
 		return 0
 	}
 
@@ -158,34 +156,26 @@ func readUInt64(dirpath string, file string) uint64 {
 
 // Lists all directories under "path" and outputs the results as children of "parent".
 func ListDirectories(dirpath string, parent string, recursive bool, output map[string]struct{}) error {
-	buf := make([]byte, godirwalk.DefaultScratchBufferSize)
-	return listDirectories(dirpath, parent, recursive, output, buf)
-}
-
-func listDirectories(dirpath string, parent string, recursive bool, output map[string]struct{}, buf []byte) error {
-	dirents, err := godirwalk.ReadDirents(dirpath, buf)
+	entries, err := ioutil.ReadDir(dirpath)
 	if err != nil {
 		// Ignore if this hierarchy does not exist.
-		if os.IsNotExist(errors.Cause(err)) {
+		if os.IsNotExist(err) {
 			err = nil
 		}
 		return err
 	}
-	for _, dirent := range dirents {
+	for _, entry := range entries {
 		// We only grab directories.
-		if !dirent.IsDir() {
-			continue
-		}
-		dirname := dirent.Name()
+		if entry.IsDir() {
+			name := path.Join(parent, entry.Name())
+			output[name] = struct{}{}
 
-		name := path.Join(parent, dirname)
-		output[name] = struct{}{}
-
-		// List subcontainers if asked to.
-		if recursive {
-			err := listDirectories(path.Join(dirpath, dirname), name, true, output, buf)
-			if err != nil {
-				return err
+			// List subcontainers if asked to.
+			if recursive {
+				err := ListDirectories(path.Join(dirpath, entry.Name()), name, true, output)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}

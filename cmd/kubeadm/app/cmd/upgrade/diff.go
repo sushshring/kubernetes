@@ -17,15 +17,16 @@ limitations under the License.
 package upgrade
 
 import (
+	"fmt"
 	"io"
 	"io/ioutil"
 
-	"github.com/pkg/errors"
+	"github.com/golang/glog"
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/version"
-	"k8s.io/klog"
+	kubeadmapiv1beta1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta1"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
 	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
 	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
@@ -77,7 +78,8 @@ func NewCmdDiff(out io.Writer) *cobra.Command {
 func runDiff(flags *diffFlags, args []string) error {
 
 	// If the version is specified in config file, pick up that value.
-	cfg, err := configutil.LoadInitConfigurationFromFile(flags.cfgPath)
+	glog.V(1).Infof("fetching configuration from file %s", flags.cfgPath)
+	cfg, err := configutil.ConfigFileAndDefaultsToInternalConfig(flags.cfgPath, &kubeadmapiv1beta1.InitConfiguration{})
 	if err != nil {
 		return err
 	}
@@ -103,7 +105,7 @@ func runDiff(flags *diffFlags, args []string) error {
 		return err
 	}
 
-	specs := controlplane.GetStaticPodSpecs(&cfg.ClusterConfiguration, &cfg.LocalAPIEndpoint, k8sVer)
+	specs := controlplane.GetStaticPodSpecs(cfg, k8sVer)
 	for spec, pod := range specs {
 		var path string
 		switch spec {
@@ -114,7 +116,7 @@ func runDiff(flags *diffFlags, args []string) error {
 		case constants.KubeScheduler:
 			path = flags.schedulerManifestPath
 		default:
-			klog.Errorf("[diff] unknown spec %v", spec)
+			glog.Errorf("[diff] unknown spec %v", spec)
 			continue
 		}
 
@@ -123,7 +125,7 @@ func runDiff(flags *diffFlags, args []string) error {
 			return err
 		}
 		if path == "" {
-			return errors.New("empty manifest path")
+			return fmt.Errorf("empty manifest path")
 		}
 		existingManifest, err := ioutil.ReadFile(path)
 		if err != nil {

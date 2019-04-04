@@ -20,10 +20,10 @@ import (
 	"flag"
 	"os"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 
 	genericapiserver "k8s.io/apiserver/pkg/server"
-	"k8s.io/component-base/logs"
+	"k8s.io/apiserver/pkg/util/logs"
 	"k8s.io/kube-aggregator/pkg/cmd/server"
 
 	// force compilation of packages we'll later rely upon
@@ -43,6 +43,6 @@ func main() {
 	cmd := server.NewCommandStartAggregator(options, stopCh)
 	cmd.Flags().AddGoFlagSet(flag.CommandLine)
 	if err := cmd.Execute(); err != nil {
-		klog.Fatal(err)
+		glog.Fatal(err)
 	}
 }

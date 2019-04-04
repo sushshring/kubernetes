@@ -20,7 +20,7 @@ import (
 
 	"github.com/google/cadvisor/manager/watcher"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 type ContainerHandlerFactory interface {
@@ -53,7 +53,6 @@ const (
 	NetworkUdpUsageMetrics  MetricKind = "udp"
 	AcceleratorUsageMetrics MetricKind = "accelerator"
 	AppMetrics              MetricKind = "app"
-	ProcessMetrics          MetricKind = "process"
 )
 
 func (mk MetricKind) String() string {
@@ -106,18 +105,18 @@ func NewContainerHandler(name string, watchType watcher.ContainerWatchSource, in
 	for _, factory := range factories[watchType] {
 		canHandle, canAccept, err := factory.CanHandleAndAccept(name)
 		if err != nil {
-			klog.V(4).Infof("Error trying to work out if we can handle %s: %v", name, err)
+			glog.V(4).Infof("Error trying to work out if we can handle %s: %v", name, err)
 		}
 		if canHandle {
 			if !canAccept {
-				klog.V(3).Infof("Factory %q can handle container %q, but ignoring.", factory, name)
+				glog.V(3).Infof("Factory %q can handle container %q, but ignoring.", factory, name)
 				return nil, false, nil
 			}
-			klog.V(3).Infof("Using factory %q for container %q", factory, name)
+			glog.V(3).Infof("Using factory %q for container %q", factory, name)
 			handle, err := factory.NewContainerHandler(name, inHostNamespace)
 			return handle, canAccept, err
 		} else {
-			klog.V(4).Infof("Factory %q was unable to handle container %q", factory, name)
+			glog.V(4).Infof("Factory %q was unable to handle container %q", factory, name)
 		}
 	}
 

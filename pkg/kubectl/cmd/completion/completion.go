@@ -44,7 +44,7 @@ const defaultBoilerPlate = `
 `
 
 var (
-	completionLong = templates.LongDesc(i18n.T(`
+	completion_long = templates.LongDesc(i18n.T(`
 		Output shell completion code for the specified shell (bash or zsh).
 		The shell code must be evaluated to provide interactive
 		completion of kubectl commands.  This can be done by sourcing it from
@@ -55,7 +55,7 @@ var (
 
 		Note for zsh users: [1] zsh completions are only supported in versions of zsh >= 5.2`))
 
-	completionExample = templates.Examples(i18n.T(`
+	completion_example = templates.Examples(i18n.T(`
 		# Installing bash completion on macOS using homebrew
 		## If running Bash 3.2 included with macOS
 		    brew install bash-completion
@@ -86,16 +86,15 @@ var (
 )
 
 var (
-	completionShells = map[string]func(out io.Writer, boilerPlate string, cmd *cobra.Command) error{
+	completion_shells = map[string]func(out io.Writer, boilerPlate string, cmd *cobra.Command) error{
 		"bash": runCompletionBash,
 		"zsh":  runCompletionZsh,
 	}
 )
 
-// NewCmdCompletion creates the `completion` command
 func NewCmdCompletion(out io.Writer, boilerPlate string) *cobra.Command {
 	shells := []string{}
-	for s := range completionShells {
+	for s := range completion_shells {
 		shells = append(shells, s)
 	}
 
@@ -103,8 +102,8 @@ func NewCmdCompletion(out io.Writer, boilerPlate string) *cobra.Command {
 		Use:                   "completion SHELL",
 		DisableFlagsInUseLine: true,
 		Short:                 i18n.T("Output shell completion code for the specified shell (bash or zsh)"),
-		Long:                  completionLong,
-		Example:               completionExample,
+		Long:                  completion_long,
+		Example:               completion_example,
 		Run: func(cmd *cobra.Command, args []string) {
 			err := RunCompletion(out, boilerPlate, cmd, args)
 			cmdutil.CheckErr(err)
@@ -115,7 +114,6 @@ func NewCmdCompletion(out io.Writer, boilerPlate string) *cobra.Command {
 	return cmd
 }
 
-// RunCompletion checks given arguments and executes command
 func RunCompletion(out io.Writer, boilerPlate string, cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return cmdutil.UsageErrorf(cmd, "Shell not specified.")
@@ -123,7 +121,7 @@ func RunCompletion(out io.Writer, boilerPlate string, cmd *cobra.Command, args [
 	if len(args) > 1 {
 		return cmdutil.UsageErrorf(cmd, "Too many arguments. Expected only the shell type.")
 	}
-	run, found := completionShells[args[0]]
+	run, found := completion_shells[args[0]]
 	if !found {
 		return cmdutil.UsageErrorf(cmd, "Unsupported shell type %q.", args[0])
 	}
@@ -143,9 +141,9 @@ func runCompletionBash(out io.Writer, boilerPlate string, kubectl *cobra.Command
 }
 
 func runCompletionZsh(out io.Writer, boilerPlate string, kubectl *cobra.Command) error {
-	zshHead := "#compdef kubectl\n"
+	zsh_head := "#compdef kubectl\n"
 
-	out.Write([]byte(zshHead))
+	out.Write([]byte(zsh_head))
 
 	if len(boilerPlate) == 0 {
 		boilerPlate = defaultBoilerPlate
@@ -154,7 +152,7 @@ func runCompletionZsh(out io.Writer, boilerPlate string, kubectl *cobra.Command)
 		return err
 	}
 
-	zshInitialization := `
+	zsh_initialization := `
 __kubectl_bash_source() {
 	alias shopt=':'
 	alias _expand=_bash_expand
@@ -296,19 +294,19 @@ __kubectl_convert_bash_to_zsh() {
 	-e "s/\\\$(type${RWORD}/\$(__kubectl_type/g" \
 	<<'BASH_COMPLETION_EOF'
 `
-	out.Write([]byte(zshInitialization))
+	out.Write([]byte(zsh_initialization))
 
 	buf := new(bytes.Buffer)
 	kubectl.GenBashCompletion(buf)
 	out.Write(buf.Bytes())
 
-	zshTail := `
+	zsh_tail := `
 BASH_COMPLETION_EOF
 }
 
 __kubectl_bash_source <(__kubectl_convert_bash_to_zsh)
 _complete kubectl 2>/dev/null
 `
-	out.Write([]byte(zshTail))
+	out.Write([]byte(zsh_tail))
 	return nil
 }

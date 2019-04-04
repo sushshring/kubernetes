@@ -1,118 +1,82 @@
 package(default_visibility = ["//visibility:public"])
 
-load("//build:platforms.bzl", "CLIENT_PLATFORMS", "NODE_PLATFORMS", "for_platforms")
-load("//build:workspace.bzl", "CNI_VERSION", "CRI_TOOLS_VERSION")
-load("@io_k8s_repo_infra//defs:build.bzl", "release_filegroup")
-load("@io_k8s_repo_infra//defs:rpm.bzl", "pkg_rpm_for_goarch")
+load("@bazel_tools//tools/build_defs/pkg:rpm.bzl", "pkg_rpm")
+load("//build:workspace.bzl", "CRI_TOOLS_VERSION")
 
-release_filegroup(
+filegroup(
     name = "rpms",
-    conditioned_srcs = for_platforms(
-        default = [],
-        for_client = [":kubectl.rpm"],
-        for_node = [
-            ":cri-tools.rpm",
-            ":kubeadm.rpm",
-            ":kubelet.rpm",
-            ":kubernetes-cni.rpm",
-        ],
-        only_os = "linux",
-    ),
+    srcs = [
+        ":cri-tools",
+        ":kubeadm",
+        ":kubectl",
+        ":kubelet",
+        ":kubernetes-cni",
+    ],
     tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
-# Create genrules to copy the arch-specific RPMs to RPMs without the arch in their filename.
-genrule(
+pkg_rpm(
     name = "kubectl",
-    srcs = select(for_platforms(
-        for_client = [":kubectl-{ARCH}.rpm"],
-        only_os = "linux",
-    )),
-    outs = ["kubectl.rpm"],
-    cmd = "cp $< $@",
-    output_to_bindir = True,
-)
-
-[genrule(
-    name = pkg,
-    srcs = select(for_platforms(
-        for_client = [":%s-{ARCH}.rpm" % pkg],
-        only_os = "linux",
-    )),
-    outs = ["%s.rpm" % pkg],
-    cmd = "cp $< $@",
-    output_to_bindir = True,
-) for pkg in [
-    "cri-tools",
-    "kubeadm",
-    "kubelet",
-    "kubernetes-cni",
-]]
-
-[pkg_rpm_for_goarch(
-    name = "kubectl",
+    architecture = "x86_64",
     changelog = "//:CHANGELOG.md",
     data = [
         "//cmd/kubectl",
     ],
-    goarch = arch,
     spec_file = "kubectl.spec",
     tags = ["manual"],
     version_file = "//build:os_package_version",
-) for arch in CLIENT_PLATFORMS["linux"]]
+)
 
-[pkg_rpm_for_goarch(
+pkg_rpm(
     name = "kubelet",
+    architecture = "x86_64",
     changelog = "//:CHANGELOG.md",
     data = [
         "kubelet.service",
         "//cmd/kubelet",
     ],
-    goarch = arch,
     spec_file = "kubelet.spec",
     tags = ["manual"],
     version_file = "//build:os_package_version",
-) for arch in NODE_PLATFORMS["linux"]]
+)
 
-[pkg_rpm_for_goarch(
+pkg_rpm(
     name = "kubeadm",
+    architecture = "x86_64",
     changelog = "//:CHANGELOG.md",
     data = [
         "10-kubeadm.conf",
-        "50-kubeadm.conf",
-        "kubeadm.conf",
         "kubelet.env",
         "//cmd/kubeadm",
     ],
-    goarch = arch,
     spec_file = "kubeadm.spec",
     tags = ["manual"],
     version_file = "//build:os_package_version",
-) for arch in NODE_PLATFORMS["linux"]]
+)
 
-[pkg_rpm_for_goarch(
+pkg_rpm(
     name = "kubernetes-cni",
+    architecture = "x86_64",
     changelog = "//:CHANGELOG.md",
     data = [
-        "@kubernetes_cni_{GOARCH}//file",
+        "@kubernetes_cni//file",
     ],
-    goarch = arch,
     spec_file = "kubernetes-cni.spec",
     tags = ["manual"],
-    version = CNI_VERSION,
-) for arch in NODE_PLATFORMS["linux"]]
+    version_file = "//build:cni_package_version",
+)
 
-[pkg_rpm_for_goarch(
+pkg_rpm(
     name = "cri-tools",
+    architecture = "x86_64",
     data = [
-        "@cri_tools_{GOARCH}//file",
+        "@cri_tools//file",
     ],
-    goarch = arch,
     spec_file = "cri-tools.spec",
     tags = ["manual"],
     version = CRI_TOOLS_VERSION,
-) for arch in NODE_PLATFORMS["linux"]]
+)
 
 filegroup(
     name = "package-srcs",

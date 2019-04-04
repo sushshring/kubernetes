@@ -27,11 +27,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/diff"
 	apiserveroptions "k8s.io/apiserver/pkg/server/options"
 	"k8s.io/apiserver/pkg/storage/storagebackend"
+	utilflag "k8s.io/apiserver/pkg/util/flag"
 	auditbuffered "k8s.io/apiserver/plugin/pkg/audit/buffered"
-	auditdynamic "k8s.io/apiserver/plugin/pkg/audit/dynamic"
 	audittruncate "k8s.io/apiserver/plugin/pkg/audit/truncate"
 	restclient "k8s.io/client-go/rest"
-	cliflag "k8s.io/component-base/cli/flag"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	kapi "k8s.io/kubernetes/pkg/apis/core"
 	kubeoptions "k8s.io/kubernetes/pkg/kubeapiserver/options"
 	kubeletclient "k8s.io/kubernetes/pkg/kubelet/client"
@@ -96,6 +96,7 @@ func TestAddFlags(t *testing.T) {
 		"--contention-profiling=true",
 		"--enable-aggregator-routing=true",
 		"--enable-logs-handler=false",
+		"--enable-swagger-ui=true",
 		"--endpoint-reconciler-type=" + string(reconcilers.LeaseEndpointReconcilerType),
 		"--etcd-keyfile=/var/run/kubernetes/etcd.key",
 		"--etcd-certfile=/var/run/kubernetes/etcdce.crt",
@@ -110,7 +111,7 @@ func TestAddFlags(t *testing.T) {
 		"--proxy-client-cert-file=/var/run/kubernetes/proxy.crt",
 		"--proxy-client-key-file=/var/run/kubernetes/proxy.key",
 		"--request-timeout=2m",
-		"--storage-backend=etcd3",
+		"--storage-backend=etcd2",
 	}
 	fs.Parse(args)
 
@@ -128,8 +129,6 @@ func TestAddFlags(t *testing.T) {
 			MaxMutatingRequestsInFlight: 200,
 			RequestTimeout:              time.Duration(2) * time.Minute,
 			MinRequestTimeout:           1800,
-			JSONPatchMaxCopyBytes:       int64(100 * 1024 * 1024),
-			MaxRequestBodyBytes:         int64(100 * 1024 * 1024),
 		},
 		Admission: &kubeoptions.AdmissionOptions{
 			GenericAdmission: &apiserveroptions.AdmissionOptions{
@@ -138,21 +137,19 @@ func TestAddFlags(t *testing.T) {
 				EnablePlugins:          []string{"AlwaysDeny"},
 				ConfigFile:             "/admission-control-config",
 				Plugins:                s.Admission.GenericAdmission.Plugins,
-				Decorators:             s.Admission.GenericAdmission.Decorators,
 			},
 		},
 		Etcd: &apiserveroptions.EtcdOptions{
 			StorageConfig: storagebackend.Config{
-				Type: "etcd3",
-				Transport: storagebackend.TransportConfig{
-					ServerList: nil,
-					KeyFile:    "/var/run/kubernetes/etcd.key",
-					CAFile:     "/var/run/kubernetes/etcdca.crt",
-					CertFile:   "/var/run/kubernetes/etcdce.crt",
-				},
-				Prefix:                "/registry",
-				CompactionInterval:    storagebackend.DefaultCompactInterval,
-				CountMetricPollPeriod: time.Minute,
+				Type:                     "etcd2",
+				ServerList:               nil,
+				Prefix:                   "/registry",
+				DeserializationCacheSize: 0,
+				KeyFile:                  "/var/run/kubernetes/etcd.key",
+				CAFile:                   "/var/run/kubernetes/etcdca.crt",
+				CertFile:                 "/var/run/kubernetes/etcdce.crt",
+				CompactionInterval:       storagebackend.DefaultCompactInterval,
+				CountMetricPollPeriod:    time.Minute,
 			},
 			DefaultStorageMediaType: "application/vnd.kubernetes.protobuf",
 			DeleteCollectionWorkers: 1,
@@ -244,12 +241,10 @@ func TestAddFlags(t *testing.T) {
 				InitialBackoff:     2 * time.Second,
 				GroupVersionString: "audit.k8s.io/v1alpha1",
 			},
-			DynamicOptions: apiserveroptions.AuditDynamicOptions{
-				BatchConfig: auditdynamic.NewDefaultWebhookBatchConfig(),
-			},
 			PolicyFile: "/policy",
 		},
 		Features: &apiserveroptions.FeatureOptions{
+			EnableSwaggerUI:           true,
 			EnableProfiling:           true,
 			EnableContentionProfiling: true,
 		},
@@ -289,8 +284,12 @@ func TestAddFlags(t *testing.T) {
 			CloudConfigFile: "/cloud-config",
 			CloudProvider:   "azure",
 		},
+		StorageSerialization: &kubeoptions.StorageSerializationOptions{
+			StorageVersions:        kubeoptions.ToPreferredVersionString(legacyscheme.Scheme.PreferredVersionAllGroups()),
+			DefaultStorageVersions: kubeoptions.ToPreferredVersionString(legacyscheme.Scheme.PreferredVersionAllGroups()),
+		},
 		APIEnablement: &apiserveroptions.APIEnablementOptions{
-			RuntimeConfig: cliflag.ConfigurationMap{},
+			RuntimeConfig: utilflag.ConfigurationMap{},
 		},
 		EnableLogsHandler:       false,
 		EnableAggregatorRouting: true,

@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"time"
 )
 
@@ -42,14 +41,6 @@ func main() {
 			w.WriteHeader(200)
 			w.Write([]byte("ok"))
 		}
-	})
-	http.HandleFunc("/redirect", func(w http.ResponseWriter, r *http.Request) {
-		loc, err := url.QueryUnescape(r.URL.Query().Get("loc"))
-		if err != nil {
-			http.Error(w, fmt.Sprintf("invalid redirect: %q", r.URL.Query().Get("loc")), http.StatusBadRequest)
-			return
-		}
-		http.Redirect(w, r, loc, http.StatusFound)
 	})
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

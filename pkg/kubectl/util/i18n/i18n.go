@@ -24,10 +24,10 @@ import (
 	"os"
 	"strings"
 
-	"k8s.io/kubernetes/pkg/kubectl/generated"
+	"k8s.io/kubernetes/pkg/generated"
 
 	"github.com/chai2010/gettext-go/gettext"
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 var knownTranslations = map[string][]string{
@@ -61,12 +61,12 @@ func loadSystemLanguage() string {
 	}
 
 	if langStr == "" {
-		klog.V(3).Infof("Couldn't find the LC_ALL, LC_MESSAGES or LANG environment variables, defaulting to en_US")
+		glog.V(3).Infof("Couldn't find the LC_ALL, LC_MESSAGES or LANG environment variables, defaulting to en_US")
 		return "default"
 	}
 	pieces := strings.Split(langStr, ".")
 	if len(pieces) != 2 {
-		klog.V(3).Infof("Unexpected system language (%s), defaulting to en_US", langStr)
+		glog.V(3).Infof("Unexpected system language (%s), defaulting to en_US", langStr)
 		return "default"
 	}
 	return pieces[0]
@@ -83,7 +83,7 @@ func findLanguage(root string, getLanguageFn func() string) string {
 			}
 		}
 	}
-	klog.V(3).Infof("Couldn't find translations for %s, using default", langStr)
+	glog.V(3).Infof("Couldn't find translations for %s, using default", langStr)
 	return "default"
 }
 
@@ -101,7 +101,7 @@ func LoadTranslations(root string, getLanguageFn func() string) error {
 		fmt.Sprintf("%s/%s/LC_MESSAGES/k8s.mo", root, langStr),
 	}
 
-	klog.V(3).Infof("Setting language to %s", langStr)
+	glog.V(3).Infof("Setting language to %s", langStr)
 	// TODO: list the directory and load all files.
 	buf := new(bytes.Buffer)
 	w := zip.NewWriter(buf)

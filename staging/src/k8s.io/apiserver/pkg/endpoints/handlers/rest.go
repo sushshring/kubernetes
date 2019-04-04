@@ -20,13 +20,12 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	goruntime "runtime"
-	"strings"
 	"time"
+
+	"github.com/golang/glog"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -34,14 +33,14 @@ import (
 	metav1beta1 "k8s.io/apimachinery/pkg/apis/meta/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
-	"k8s.io/apiserver/pkg/endpoints/handlers/fieldmanager"
 	"k8s.io/apiserver/pkg/endpoints/handlers/responsewriters"
 	"k8s.io/apiserver/pkg/endpoints/metrics"
 	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
-	"k8s.io/klog"
+	openapiproto "k8s.io/kube-openapi/pkg/util/proto"
 )
 
 // RequestScope encapsulates common fields across all RESTful handler methods.
@@ -59,32 +58,25 @@ type RequestScope struct {
 	Authorizer      authorizer.Authorizer
 
 	TableConvertor rest.TableConvertor
-	FieldManager   *fieldmanager.FieldManager
+	OpenAPISchema  openapiproto.Schema
 
 	Resource    schema.GroupVersionResource
 	Kind        schema.GroupVersionKind
 	Subresource string
 
 	MetaGroupVersion schema.GroupVersion
-
-	// HubGroupVersion indicates what version objects read from etcd or incoming requests should be converted to for in-memory handling.
-	HubGroupVersion schema.GroupVersion
-
-	MaxRequestBodyBytes int64
 }
 
 func (scope *RequestScope) err(err error, w http.ResponseWriter, req *http.Request) {
 	responsewriters.ErrorNegotiated(err, scope.Serializer, scope.Kind.GroupVersion(), w, req)
 }
 
-func (scope *RequestScope) AllowsConversion(gvk schema.GroupVersionKind, mimeType, mimeSubType string) bool {
+func (scope *RequestScope) AllowsConversion(gvk schema.GroupVersionKind) bool {
 	// TODO: this is temporary, replace with an abstraction calculated at endpoint installation time
 	if gvk.GroupVersion() == metav1beta1.SchemeGroupVersion {
 		switch gvk.Kind {
 		case "Table":
-			return scope.TableConvertor != nil &&
-				mimeType == "application" &&
-				(mimeSubType == "json" || mimeSubType == "yaml")
+			return scope.TableConvertor != nil
 		case "PartialObjectMetadata", "PartialObjectMetadataList":
 			// TODO: should delineate between lists and non-list endpoints
 			return true
@@ -103,15 +95,8 @@ func (scope *RequestScope) AllowsStreamSchema(s string) bool {
 	return s == "watch"
 }
 
-var _ admission.ObjectInterfaces = &RequestScope{}
-
-func (r *RequestScope) GetObjectCreater() runtime.ObjectCreater     { return r.Creater }
-func (r *RequestScope) GetObjectTyper() runtime.ObjectTyper         { return r.Typer }
-func (r *RequestScope) GetObjectDefaulter() runtime.ObjectDefaulter { return r.Defaulter }
-func (r *RequestScope) GetObjectConvertor() runtime.ObjectConvertor { return r.Convertor }
-
 // ConnectResource returns a function that handles a connect request on a rest.Storage object.
-func ConnectResource(connecter rest.Connecter, scope *RequestScope, admit admission.Interface, restPath string, isSubresource bool) http.HandlerFunc {
+func ConnectResource(connecter rest.Connecter, scope RequestScope, admit admission.Interface, restPath string, isSubresource bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		if isDryRun(req.URL) {
 			scope.err(errors.NewBadRequest("dryRun is not supported"), w, req)
@@ -138,14 +123,14 @@ func ConnectResource(connecter rest.Connecter, scope *RequestScope, admit admiss
 			userInfo, _ := request.UserFrom(ctx)
 			// TODO: remove the mutating admission here as soon as we have ported all plugin that handle CONNECT
 			if mutatingAdmission, ok := admit.(admission.MutationInterface); ok {
-				err = mutatingAdmission.Admit(admission.NewAttributesRecord(opts, nil, scope.Kind, namespace, name, scope.Resource, scope.Subresource, admission.Connect, false, userInfo), scope)
+				err = mutatingAdmission.Admit(admission.NewAttributesRecord(opts, nil, scope.Kind, namespace, name, scope.Resource, scope.Subresource, admission.Connect, false, userInfo))
 				if err != nil {
 					scope.err(err, w, req)
 					return
 				}
 			}
 			if validatingAdmission, ok := admit.(admission.ValidationInterface); ok {
-				err = validatingAdmission.Validate(admission.NewAttributesRecord(opts, nil, scope.Kind, namespace, name, scope.Resource, scope.Subresource, admission.Connect, false, userInfo), scope)
+				err = validatingAdmission.Validate(admission.NewAttributesRecord(opts, nil, scope.Kind, namespace, name, scope.Resource, scope.Subresource, admission.Connect, false, userInfo))
 				if err != nil {
 					scope.err(err, w, req)
 					return
@@ -153,7 +138,7 @@ func ConnectResource(connecter rest.Connecter, scope *RequestScope, admit admiss
 			}
 		}
 		requestInfo, _ := request.RequestInfoFrom(ctx)
-		metrics.RecordLongRunning(req, requestInfo, metrics.APIServerComponent, func() {
+		metrics.RecordLongRunning(req, requestInfo, func() {
 			handler, err := connecter.Connect(ctx, name, opts, &responder{scope: scope, req: req, w: w})
 			if err != nil {
 				scope.err(err, w, req)
@@ -166,13 +151,13 @@ func ConnectResource(connecter rest.Connecter, scope *RequestScope, admit admiss
 
 // responder implements rest.Responder for assisting a connector in writing objects or errors.
 type responder struct {
-	scope *RequestScope
+	scope RequestScope
 	req   *http.Request
 	w     http.ResponseWriter
 }
 
 func (r *responder) Object(statusCode int, obj runtime.Object) {
-	responsewriters.WriteObjectNegotiated(r.scope.Serializer, r.scope, r.scope.Kind.GroupVersion(), r.w, r.req, statusCode, obj)
+	responsewriters.WriteObject(statusCode, r.scope.Kind.GroupVersion(), r.scope.Serializer, obj, r.w, r.req)
 }
 
 func (r *responder) Error(err error) {
@@ -192,17 +177,10 @@ func finishRequest(timeout time.Duration, fn resultFunc) (result runtime.Object,
 	panicCh := make(chan interface{}, 1)
 	go func() {
 		// panics don't cross goroutine boundaries, so we have to handle ourselves
-		defer func() {
-			panicReason := recover()
-			if panicReason != nil {
-				const size = 64 << 10
-				buf := make([]byte, size)
-				buf = buf[:goruntime.Stack(buf, false)]
-				panicReason = strings.TrimSuffix(fmt.Sprintf("%v\n%s", panicReason, string(buf)), "\n")
-				// Propagate to parent goroutine
-				panicCh <- panicReason
-			}
-		}()
+		defer utilruntime.HandleCrash(func(panicReason interface{}) {
+			// Propagate to parent goroutine
+			panicCh <- panicReason
+		})
 
 		if result, err := fn(); err != nil {
 			errCh <- err
@@ -289,31 +267,23 @@ func checkName(obj runtime.Object, name, namespace string, namer ScopeNamer) err
 	return nil
 }
 
-// setObjectSelfLink sets the self link of an object as needed.
-// TODO: remove the need for the namer LinkSetters by requiring objects implement either Object or List
-//   interfaces
-func setObjectSelfLink(ctx context.Context, obj runtime.Object, req *http.Request, namer ScopeNamer) error {
-	// We only generate list links on objects that implement ListInterface - historically we duck typed this
-	// check via reflection, but as we move away from reflection we require that you not only carry Items but
-	// ListMeta into order to be identified as a list.
+// setListSelfLink sets the self link of a list to the base URL, then sets the self links
+// on all child objects returned. Returns the number of items in the list.
+func setListSelfLink(obj runtime.Object, ctx context.Context, req *http.Request, namer ScopeNamer) (int, error) {
 	if !meta.IsListType(obj) {
-		requestInfo, ok := request.RequestInfoFrom(ctx)
-		if !ok {
-			return fmt.Errorf("missing requestInfo")
-		}
-		return setSelfLink(obj, requestInfo, namer)
+		return 0, nil
 	}
 
 	uri, err := namer.GenerateListLink(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := namer.SetSelfLink(obj, uri); err != nil {
-		klog.V(4).Infof("Unable to set self link on object: %v", err)
+		glog.V(4).Infof("Unable to set self link on object: %v", err)
 	}
 	requestInfo, ok := request.RequestInfoFrom(ctx)
 	if !ok {
-		return fmt.Errorf("missing requestInfo")
+		return 0, fmt.Errorf("missing requestInfo")
 	}
 
 	count := 0
@@ -321,14 +291,7 @@ func setObjectSelfLink(ctx context.Context, obj runtime.Object, req *http.Reques
 		count++
 		return setSelfLink(obj, requestInfo, namer)
 	})
-
-	if count == 0 {
-		if err := meta.SetList(obj, []runtime.Object{}); err != nil {
-			return err
-		}
-	}
-
-	return err
+	return count, err
 }
 
 func summarizeData(data []byte, maxLength int) string {
@@ -348,23 +311,9 @@ func summarizeData(data []byte, maxLength int) string {
 	}
 }
 
-func limitedReadBody(req *http.Request, limit int64) ([]byte, error) {
+func readBody(req *http.Request) ([]byte, error) {
 	defer req.Body.Close()
-	if limit <= 0 {
-		return ioutil.ReadAll(req.Body)
-	}
-	lr := &io.LimitedReader{
-		R: req.Body,
-		N: limit + 1,
-	}
-	data, err := ioutil.ReadAll(lr)
-	if err != nil {
-		return nil, err
-	}
-	if lr.N <= 0 {
-		return nil, errors.NewRequestEntityTooLargeError(fmt.Sprintf("limit is %d", limit))
-	}
-	return data, nil
+	return ioutil.ReadAll(req.Body)
 }
 
 func parseTimeout(str string) time.Duration {
@@ -373,7 +322,7 @@ func parseTimeout(str string) time.Duration {
 		if err == nil {
 			return timeout
 		}
-		klog.Errorf("Failed to parse %q: %v", str, err)
+		glog.Errorf("Failed to parse %q: %v", str, err)
 	}
 	return 30 * time.Second
 }

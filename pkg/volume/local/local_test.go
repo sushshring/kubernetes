@@ -41,6 +41,7 @@ const (
 	testMountPath                     = "pods/poduid/volumes/kubernetes.io~local-volume/pvA"
 	testGlobalPath                    = "plugins/kubernetes.io~local-volume/volumeDevices/pvA"
 	testPodPath                       = "pods/poduid/volumeDevices/kubernetes.io~local-volume"
+	testNodeName                      = "fakeNodeName"
 	testBlockFormattingToFSGlobalPath = "plugins/kubernetes.io/local-volume/mounts/pvA"
 )
 

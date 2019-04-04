@@ -1,5 +1,3 @@
-# See the OWNERS docs at https://go.k8s.io/owners
-
 reviewers:
   - bowei
   - rramkumar1
@@ -17,7 +15,6 @@ reviewers:
   - madhusudancs
   - marun
   - mikedanese
-  - msau42 # for test/e2e/commmon/{*volume,empty_dir}.go and test/e2e/framework/{pv|volume}_util.go
   - ncdc
   - pwittrock # for test/e2e/kubectl.go
   - saad-ali
@@ -29,9 +26,6 @@ reviewers:
   - timothysc
   - zmerlynn
   - vishh
-  - MaciekPytel # for test/e2e/common/autoscaling_utils.go
-  - oomichi
-  - xichengliudui
 approvers:
   - bowei # for test/e2e/{dns*,network}.go
   - cblecker
@@ -51,7 +45,6 @@ approvers:
   - madhusudancs
   - marun
   - mikedanese
-  - msau42 # for test/e2e/commmon/{*volume,empty_dir}.go and test/e2e/framework/{pv|volume}_util.go
   - ncdc
   - pwittrock # for test/e2e/kubectl.go
   - saad-ali
@@ -63,7 +56,5 @@ approvers:
   - timothysc
   - zmerlynn
   - vishh
-  - MaciekPytel # for test/e2e/common/autoscaling_utils.go
 labels:
-- area/test
 - sig/testing

@@ -25,7 +25,9 @@ import (
 // DeprecatedControllerOptions holds the DeprecatedController options, those option are deprecated.
 // TODO remove these fields once the deprecated flags are removed.
 type DeprecatedControllerOptions struct {
-	*kubectrlmgrconfig.DeprecatedControllerConfiguration
+	DeletingPodsQPS    float32
+	DeletingPodsBurst  int32
+	RegisterRetryCount int32
 }
 
 // AddFlags adds flags related to DeprecatedController for controller manager to the specified FlagSet.

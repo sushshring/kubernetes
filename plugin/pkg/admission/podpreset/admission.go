@@ -22,7 +22,7 @@ import (
 	"reflect"
 	"strings"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 
 	settingsv1alpha1 "k8s.io/api/settings/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -90,7 +90,7 @@ func (a *podPresetPlugin) SetExternalKubeInformerFactory(f informers.SharedInfor
 }
 
 // Admit injects a pod with the specific fields for each pod preset it matches.
-func (c *podPresetPlugin) Admit(a admission.Attributes, o admission.ObjectInterfaces) error {
+func (c *podPresetPlugin) Admit(a admission.Attributes) error {
 	// Ignore all calls to subresources or resources other than pods.
 	// Ignore all operations other than CREATE.
 	if len(a.GetSubresource()) != 0 || a.GetResource().GroupResource() != api.Resource("pods") || a.GetOperation() != admission.Create {
@@ -108,7 +108,7 @@ func (c *podPresetPlugin) Admit(a admission.Attributes, o admission.ObjectInterf
 
 	// Ignore if exclusion annotation is present
 	if podAnnotations := pod.GetAnnotations(); podAnnotations != nil {
-		klog.V(5).Infof("Looking at pod annotations, found: %v", podAnnotations)
+		glog.V(5).Infof("Looking at pod annotations, found: %v", podAnnotations)
 		if podAnnotations[api.PodPresetOptOutAnnotationKey] == "true" {
 			return nil
 		}
@@ -137,14 +137,14 @@ func (c *podPresetPlugin) Admit(a admission.Attributes, o admission.ObjectInterf
 	err = safeToApplyPodPresetsOnPod(pod, matchingPPs)
 	if err != nil {
 		// conflict, ignore the error, but raise an event
-		klog.Warningf("conflict occurred while applying podpresets: %s on pod: %v err: %v",
+		glog.Warningf("conflict occurred while applying podpresets: %s on pod: %v err: %v",
 			strings.Join(presetNames, ","), pod.GetGenerateName(), err)
 		return nil
 	}
 
 	applyPodPresetsOnPod(pod, matchingPPs)
 
-	klog.Infof("applied podpresets: %s successfully on Pod: %+v ", strings.Join(presetNames, ","), pod.GetGenerateName())
+	glog.Infof("applied podpresets: %s successfully on Pod: %+v ", strings.Join(presetNames, ","), pod.GetGenerateName())
 
 	return nil
 }
@@ -163,7 +163,7 @@ func filterPodPresets(list []*settingsv1alpha1.PodPreset, pod *api.Pod) ([]*sett
 		if !selector.Matches(labels.Set(pod.Labels)) {
 			continue
 		}
-		klog.V(4).Infof("PodPreset %s matches pod %s labels", pp.GetName(), pod.GetName())
+		glog.V(4).Infof("PodPreset %s matches pod %s labels", pp.GetName(), pod.GetName())
 		matchingPPs = append(matchingPPs, pp)
 	}
 	return matchingPPs, nil
@@ -184,12 +184,6 @@ func safeToApplyPodPresetsOnPod(pod *api.Pod, podPresets []*settingsv1alpha1.Pod
 			errs = append(errs, err)
 		}
 	}
-	for _, iCtr := range pod.Spec.InitContainers {
-		if err := safeToApplyPodPresetsOnContainer(&iCtr, podPresets); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
 	return utilerrors.NewAggregate(errs)
 }
 
@@ -386,10 +380,6 @@ func applyPodPresetsOnPod(pod *api.Pod, podPresets []*settingsv1alpha1.PodPreset
 	for i, ctr := range pod.Spec.Containers {
 		applyPodPresetsOnContainer(&ctr, podPresets)
 		pod.Spec.Containers[i] = ctr
-	}
-	for i, iCtr := range pod.Spec.InitContainers {
-		applyPodPresetsOnContainer(&iCtr, podPresets)
-		pod.Spec.InitContainers[i] = iCtr
 	}
 
 	// add annotation

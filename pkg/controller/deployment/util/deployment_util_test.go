@@ -506,6 +506,7 @@ func TestFindOldReplicaSets(t *testing.T) {
 		Name            string
 		deployment      apps.Deployment
 		rsList          []*apps.ReplicaSet
+		podList         *v1.PodList
 		expected        []*apps.ReplicaSet
 		expectedRequire []*apps.ReplicaSet
 	}{

@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"sigs.k8s.io/yaml"
+	"github.com/ghodss/yaml"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -42,7 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	genericprinters "k8s.io/cli-runtime/pkg/printers"
+	genericprinters "k8s.io/cli-runtime/pkg/genericclioptions/printers"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/api/testapi"
 	"k8s.io/kubernetes/pkg/apis/apps"
@@ -50,13 +50,17 @@ import (
 	"k8s.io/kubernetes/pkg/apis/batch"
 	"k8s.io/kubernetes/pkg/apis/coordination"
 	api "k8s.io/kubernetes/pkg/apis/core"
-	"k8s.io/kubernetes/pkg/apis/networking"
-	nodeapi "k8s.io/kubernetes/pkg/apis/node"
+	"k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/pkg/apis/policy"
 	"k8s.io/kubernetes/pkg/apis/scheduling"
 	"k8s.io/kubernetes/pkg/apis/storage"
 	"k8s.io/kubernetes/pkg/printers"
 )
+
+func init() {
+	legacyscheme.Scheme.AddKnownTypes(schema.GroupVersion{Group: "", Version: runtime.APIVersionInternal}, &TestPrintType{})
+	legacyscheme.Scheme.AddKnownTypes(schema.GroupVersion{Group: "", Version: "v1"}, &TestPrintType{})
+}
 
 var testData = TestStruct{
 	TypeMeta:   metav1.TypeMeta{APIVersion: "foo/bar", Kind: "TestStruct"},
@@ -1070,7 +1074,7 @@ func contains(fields []string, field string) bool {
 }
 
 func TestPrintHunmanReadableIngressWithColumnLabels(t *testing.T) {
-	ingress := networking.Ingress{
+	ingress := extensions.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "test1",
 			CreationTimestamp: metav1.Time{Time: time.Now().AddDate(-10, 0, 0)},
@@ -1078,13 +1082,13 @@ func TestPrintHunmanReadableIngressWithColumnLabels(t *testing.T) {
 				"app_name": "kubectl_test_ingress",
 			},
 		},
-		Spec: networking.IngressSpec{
-			Backend: &networking.IngressBackend{
+		Spec: extensions.IngressSpec{
+			Backend: &extensions.IngressBackend{
 				ServiceName: "svc",
 				ServicePort: intstr.FromInt(93),
 			},
 		},
-		Status: networking.IngressStatus{
+		Status: extensions.IngressStatus{
 			LoadBalancer: api.LoadBalancerStatus{
 				Ingress: []api.LoadBalancerIngress{
 					{
@@ -1650,9 +1654,6 @@ func TestPrintPod(t *testing.T) {
 }
 
 func TestPrintPodwide(t *testing.T) {
-	condition1 := "condition1"
-	condition2 := "condition2"
-	condition3 := "condition3"
 	tests := []struct {
 		pod    api.Pod
 		expect []metav1beta1.TableRow
@@ -1664,29 +1665,8 @@ func TestPrintPodwide(t *testing.T) {
 				Spec: api.PodSpec{
 					Containers: make([]api.Container, 2),
 					NodeName:   "test1",
-					ReadinessGates: []api.PodReadinessGate{
-						{
-							ConditionType: api.PodConditionType(condition1),
-						},
-						{
-							ConditionType: api.PodConditionType(condition2),
-						},
-						{
-							ConditionType: api.PodConditionType(condition3),
-						},
-					},
 				},
 				Status: api.PodStatus{
-					Conditions: []api.PodCondition{
-						{
-							Type:   api.PodConditionType(condition1),
-							Status: api.ConditionFalse,
-						},
-						{
-							Type:   api.PodConditionType(condition2),
-							Status: api.ConditionTrue,
-						},
-					},
 					Phase: "podPhase",
 					PodIP: "1.1.1.1",
 					ContainerStatuses: []api.ContainerStatus{
@@ -1696,7 +1676,7 @@ func TestPrintPodwide(t *testing.T) {
 					NominatedNodeName: "node1",
 				},
 			},
-			[]metav1beta1.TableRow{{Cells: []interface{}{"test1", "1/2", "podPhase", int64(6), "<unknown>", "1.1.1.1", "test1", "node1", "1/3"}}},
+			[]metav1beta1.TableRow{{Cells: []interface{}{"test1", "1/2", "podPhase", int64(6), "<unknown>", "1.1.1.1", "test1", "node1"}}},
 		},
 		{
 			// Test when the NodeName and PodIP are none
@@ -1715,7 +1695,7 @@ func TestPrintPodwide(t *testing.T) {
 					},
 				},
 			},
-			[]metav1beta1.TableRow{{Cells: []interface{}{"test2", "1/2", "ContainerWaitingReason", int64(6), "<unknown>", "<none>", "<none>", "<none>", "<none>"}}},
+			[]metav1beta1.TableRow{{Cells: []interface{}{"test2", "1/2", "ContainerWaitingReason", int64(6), "<unknown>", "<none>", "<none>", "<none>"}}},
 		},
 	}
 
@@ -1996,17 +1976,17 @@ func TestTranslateTimestampUntil(t *testing.T) {
 
 func TestPrintDeployment(t *testing.T) {
 	tests := []struct {
-		deployment apps.Deployment
+		deployment extensions.Deployment
 		expect     string
 		wideExpect string
 	}{
 		{
-			apps.Deployment{
+			extensions.Deployment{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "test1",
 					CreationTimestamp: metav1.Time{Time: time.Now().Add(1.9e9)},
 				},
-				Spec: apps.DeploymentSpec{
+				Spec: extensions.DeploymentSpec{
 					Replicas: 5,
 					Template: api.PodTemplateSpec{
 						Spec: api.PodSpec{
@@ -2024,15 +2004,15 @@ func TestPrintDeployment(t *testing.T) {
 					},
 					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"foo": "bar"}},
 				},
-				Status: apps.DeploymentStatus{
+				Status: extensions.DeploymentStatus{
 					Replicas:            10,
 					UpdatedReplicas:     2,
 					AvailableReplicas:   1,
 					UnavailableReplicas: 4,
 				},
 			},
-			"test1\t0/5\t2\t1\t0s\n",
-			"test1\t0/5\t2\t1\t0s\tfake-container1,fake-container2\tfake-image1,fake-image2\tfoo=bar\n",
+			"test1\t5\t10\t2\t1\t0s\n",
+			"test1\t5\t10\t2\t1\t0s\tfake-container1,fake-container2\tfake-image1,fake-image2\tfoo=bar\n",
 		},
 	}
 
@@ -2065,21 +2045,21 @@ func TestPrintDeployment(t *testing.T) {
 
 func TestPrintDaemonSet(t *testing.T) {
 	tests := []struct {
-		ds         apps.DaemonSet
+		ds         extensions.DaemonSet
 		startsWith string
 	}{
 		{
-			apps.DaemonSet{
+			extensions.DaemonSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "test1",
 					CreationTimestamp: metav1.Time{Time: time.Now().Add(1.9e9)},
 				},
-				Spec: apps.DaemonSetSpec{
+				Spec: extensions.DaemonSetSpec{
 					Template: api.PodTemplateSpec{
 						Spec: api.PodSpec{Containers: make([]api.Container, 2)},
 					},
 				},
-				Status: apps.DaemonSetStatus{
+				Status: extensions.DaemonSetStatus{
 					CurrentNumberScheduled: 2,
 					DesiredNumberScheduled: 3,
 					NumberReady:            1,
@@ -3179,17 +3159,17 @@ func boolP(b bool) *bool {
 
 func TestPrintReplicaSet(t *testing.T) {
 	tests := []struct {
-		replicaSet apps.ReplicaSet
+		replicaSet extensions.ReplicaSet
 		expect     string
 		wideExpect string
 	}{
 		{
-			apps.ReplicaSet{
+			extensions.ReplicaSet{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "test1",
 					CreationTimestamp: metav1.Time{Time: time.Now().Add(1.9e9)},
 				},
-				Spec: apps.ReplicaSetSpec{
+				Spec: extensions.ReplicaSetSpec{
 					Replicas: 5,
 					Template: api.PodTemplateSpec{
 						Spec: api.PodSpec{
@@ -3207,7 +3187,7 @@ func TestPrintReplicaSet(t *testing.T) {
 					},
 					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"foo": "bar"}},
 				},
-				Status: apps.ReplicaSetStatus{
+				Status: extensions.ReplicaSetStatus{
 					Replicas:      5,
 					ReadyReplicas: 2,
 				},
@@ -3557,50 +3537,6 @@ func TestPrintPriorityClass(t *testing.T) {
 	}
 }
 
-func TestPrintRuntimeClass(t *testing.T) {
-	tests := []struct {
-		rc     nodeapi.RuntimeClass
-		expect string
-	}{
-		{
-			nodeapi.RuntimeClass{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "rc1",
-					CreationTimestamp: metav1.Time{Time: time.Now().Add(1.9e9)},
-				},
-				Handler: "h1",
-			},
-			"rc1\th1\t0s\n",
-		},
-		{
-			nodeapi.RuntimeClass{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "rc2",
-					CreationTimestamp: metav1.Time{Time: time.Now().Add(-3e11)},
-				},
-				Handler: "h2",
-			},
-			"rc2\th2\t5m\n",
-		},
-	}
-
-	buf := bytes.NewBuffer([]byte{})
-	for _, test := range tests {
-		table, err := printers.NewTablePrinter().With(AddHandlers).PrintTable(&test.rc, printers.PrintOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		verifyTable(t, table)
-		if err := printers.PrintTable(table, buf, printers.PrintOptions{NoHeaders: true}); err != nil {
-			t.Fatal(err)
-		}
-		if buf.String() != test.expect {
-			t.Fatalf("Expected: %s, got: %s", test.expect, buf.String())
-		}
-		buf.Reset()
-	}
-}
-
 func verifyTable(t *testing.T, table *metav1beta1.Table) {
 	var panicErr interface{}
 	func() {
@@ -3612,29 +3548,5 @@ func verifyTable(t *testing.T, table *metav1beta1.Table) {
 
 	if panicErr != nil {
 		t.Errorf("unexpected panic during deepcopy of table %#v: %v", table, panicErr)
-	}
-}
-
-// VerifyDatesInOrder checks the start of each line for a RFC1123Z date
-// and posts error if all subsequent dates are not equal or increasing
-func VerifyDatesInOrder(
-	resultToTest, rowDelimiter, columnDelimiter string, t *testing.T) {
-	lines := strings.Split(resultToTest, rowDelimiter)
-	var previousTime time.Time
-	for _, str := range lines {
-		columns := strings.Split(str, columnDelimiter)
-		if len(columns) > 0 {
-			currentTime, err := time.Parse(time.RFC1123Z, columns[0])
-			if err == nil {
-				if previousTime.After(currentTime) {
-					t.Errorf(
-						"Output is not sorted by time. %s should be listed after %s. Complete output: %s",
-						previousTime.Format(time.RFC1123Z),
-						currentTime.Format(time.RFC1123Z),
-						resultToTest)
-				}
-				previousTime = currentTime
-			}
-		}
 	}
 }

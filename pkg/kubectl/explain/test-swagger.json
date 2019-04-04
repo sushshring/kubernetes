@@ -73,15 +73,6 @@
           "$ref": "#/definitions/PrimitiveDef"
         }
       }
-    },
-    "CrdKind": {
-      "x-kubernetes-group-version-kind": [
-        {
-         "group": "",
-         "kind": "CrdKind",
-         "version": "v1"
-        }
-       ]
     }
   }
 }

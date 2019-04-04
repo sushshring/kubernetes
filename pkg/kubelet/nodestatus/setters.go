@@ -29,7 +29,6 @@ import (
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/errors"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	cloudprovider "k8s.io/cloud-provider"
@@ -43,7 +42,7 @@ import (
 	"k8s.io/kubernetes/pkg/version"
 	"k8s.io/kubernetes/pkg/volume"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 const (
@@ -70,7 +69,7 @@ func NodeAddress(nodeIP net.IP, // typically Kubelet.nodeIP
 			if err := validateNodeIPFunc(nodeIP); err != nil {
 				return fmt.Errorf("failed to validate nodeIP: %v", err)
 			}
-			klog.V(2).Infof("Using node IP: %q", nodeIP.String())
+			glog.V(2).Infof("Using node IP: %q", nodeIP.String())
 		}
 
 		if externalCloudProvider {
@@ -91,16 +90,17 @@ func NodeAddress(nodeIP net.IP, // typically Kubelet.nodeIP
 			if nodeIP != nil {
 				enforcedNodeAddresses := []v1.NodeAddress{}
 
-				nodeIPTypes := make(map[v1.NodeAddressType]bool)
+				var nodeIPType v1.NodeAddressType
 				for _, nodeAddress := range nodeAddresses {
 					if nodeAddress.Address == nodeIP.String() {
 						enforcedNodeAddresses = append(enforcedNodeAddresses, v1.NodeAddress{Type: nodeAddress.Type, Address: nodeAddress.Address})
-						nodeIPTypes[nodeAddress.Type] = true
+						nodeIPType = nodeAddress.Type
+						break
 					}
 				}
 				if len(enforcedNodeAddresses) > 0 {
 					for _, nodeAddress := range nodeAddresses {
-						if !nodeIPTypes[nodeAddress.Type] && nodeAddress.Type != v1.NodeHostName {
+						if nodeAddress.Type != nodeIPType && nodeAddress.Type != v1.NodeHostName {
 							enforcedNodeAddresses = append(enforcedNodeAddresses, v1.NodeAddress{Type: nodeAddress.Type, Address: nodeAddress.Address})
 						}
 					}
@@ -137,11 +137,11 @@ func NodeAddress(nodeIP net.IP, // typically Kubelet.nodeIP
 
 				if existingHostnameAddress == nil {
 					// no existing Hostname address found, add it
-					klog.Warningf("adding overridden hostname of %v to cloudprovider-reported addresses", hostname)
+					glog.Warningf("adding overridden hostname of %v to cloudprovider-reported addresses", hostname)
 					nodeAddresses = append(nodeAddresses, v1.NodeAddress{Type: v1.NodeHostName, Address: hostname})
-				} else if existingHostnameAddress.Address != hostname {
+				} else {
 					// override the Hostname address reported by the cloud provider
-					klog.Warningf("replacing cloudprovider-reported hostname of %v with overridden hostname of %v", existingHostnameAddress.Address, hostname)
+					glog.Warningf("replacing cloudprovider-reported hostname of %v with overridden hostname of %v", existingHostnameAddress.Address, hostname)
 					existingHostnameAddress.Address = hostname
 				}
 			}
@@ -239,7 +239,7 @@ func MachineInfo(nodeName string,
 			node.Status.Capacity[v1.ResourceCPU] = *resource.NewMilliQuantity(0, resource.DecimalSI)
 			node.Status.Capacity[v1.ResourceMemory] = resource.MustParse("0Gi")
 			node.Status.Capacity[v1.ResourcePods] = *resource.NewQuantity(int64(maxPods), resource.DecimalSI)
-			klog.Errorf("Error getting machine info: %v", err)
+			glog.Errorf("Error getting machine info: %v", err)
 		} else {
 			node.Status.NodeInfo.MachineID = info.MachineID
 			node.Status.NodeInfo.SystemUUID = info.SystemUUID
@@ -270,9 +270,7 @@ func MachineInfo(nodeName string,
 				// capacity for every node status request
 				initialCapacity := capacityFunc()
 				if initialCapacity != nil {
-					if v, exists := initialCapacity[v1.ResourceEphemeralStorage]; exists {
-						node.Status.Capacity[v1.ResourceEphemeralStorage] = v
-					}
+					node.Status.Capacity[v1.ResourceEphemeralStorage] = initialCapacity[v1.ResourceEphemeralStorage]
 				}
 			}
 
@@ -280,14 +278,14 @@ func MachineInfo(nodeName string,
 			if devicePluginCapacity != nil {
 				for k, v := range devicePluginCapacity {
 					if old, ok := node.Status.Capacity[k]; !ok || old.Value() != v.Value() {
-						klog.V(2).Infof("Update capacity for %s to %d", k, v.Value())
+						glog.V(2).Infof("Update capacity for %s to %d", k, v.Value())
 					}
 					node.Status.Capacity[k] = v
 				}
 			}
 
 			for _, removedResource := range removedDevicePlugins {
-				klog.V(2).Infof("Set capacity for %s to 0 on device removal", removedResource)
+				glog.V(2).Infof("Set capacity for %s to 0 on device removal", removedResource)
 				// Set the capacity of the removed resource to 0 instead of
 				// removing the resource from the node status. This is to indicate
 				// that the resource is managed by device plugin and had been
@@ -328,7 +326,7 @@ func MachineInfo(nodeName string,
 		if devicePluginAllocatable != nil {
 			for k, v := range devicePluginAllocatable {
 				if old, ok := node.Status.Allocatable[k]; !ok || old.Value() != v.Value() {
-					klog.V(2).Infof("Update allocatable for %s to %d", k, v.Value())
+					glog.V(2).Infof("Update allocatable for %s to %d", k, v.Value())
 				}
 				node.Status.Allocatable[k] = v
 			}
@@ -359,7 +357,7 @@ func VersionInfo(versionInfoFunc func() (*cadvisorapiv1.VersionInfo, error), // 
 		verinfo, err := versionInfoFunc()
 		if err != nil {
 			// TODO(mtaufen): consider removing this log line, since returned error will be logged
-			klog.Errorf("Error getting version info: %v", err)
+			glog.Errorf("Error getting version info: %v", err)
 			return fmt.Errorf("error getting version info: %v", err)
 		}
 
@@ -399,7 +397,7 @@ func Images(nodeStatusMaxImages int32,
 		containerImages, err := imageListFunc()
 		if err != nil {
 			// TODO(mtaufen): consider removing this log line, since returned error will be logged
-			klog.Errorf("Error getting image list: %v", err)
+			glog.Errorf("Error getting image list: %v", err)
 			node.Status.Images = imagesOnNode
 			return fmt.Errorf("error getting image list: %v", err)
 		}
@@ -438,9 +436,8 @@ func GoRuntime() Setter {
 // ReadyCondition returns a Setter that updates the v1.NodeReady condition on the node.
 func ReadyCondition(
 	nowFunc func() time.Time, // typically Kubelet.clock.Now
-	runtimeErrorsFunc func() error, // typically Kubelet.runtimeState.runtimeErrors
-	networkErrorsFunc func() error, // typically Kubelet.runtimeState.networkErrors
-	storageErrorsFunc func() error, // typically Kubelet.runtimeState.storageErrors
+	runtimeErrorsFunc func() []string, // typically Kubelet.runtimeState.runtimeErrors
+	networkErrorsFunc func() []string, // typically Kubelet.runtimeState.networkErrors
 	appArmorValidateHostFunc func() error, // typically Kubelet.appArmorValidator.ValidateHost, might be nil depending on whether there was an appArmorValidator
 	cmStatusFunc func() cm.Status, // typically Kubelet.containerManager.Status
 	recordEventFunc func(eventType, event string), // typically Kubelet.recordNodeStatusEvent
@@ -457,7 +454,7 @@ func ReadyCondition(
 			Message:           "kubelet is posting ready status",
 			LastHeartbeatTime: currentTime,
 		}
-		errs := []error{runtimeErrorsFunc(), networkErrorsFunc(), storageErrorsFunc()}
+		rs := append(runtimeErrorsFunc(), networkErrorsFunc()...)
 		requiredCapacities := []v1.ResourceName{v1.ResourceCPU, v1.ResourceMemory, v1.ResourcePods}
 		if utilfeature.DefaultFeatureGate.Enabled(features.LocalStorageCapacityIsolation) {
 			requiredCapacities = append(requiredCapacities, v1.ResourceEphemeralStorage)
@@ -469,14 +466,14 @@ func ReadyCondition(
 			}
 		}
 		if len(missingCapacities) > 0 {
-			errs = append(errs, fmt.Errorf("Missing node capacity for resources: %s", strings.Join(missingCapacities, ", ")))
+			rs = append(rs, fmt.Sprintf("Missing node capacity for resources: %s", strings.Join(missingCapacities, ", ")))
 		}
-		if aggregatedErr := errors.NewAggregate(errs); aggregatedErr != nil {
+		if len(rs) > 0 {
 			newNodeReadyCondition = v1.NodeCondition{
 				Type:              v1.NodeReady,
 				Status:            v1.ConditionFalse,
 				Reason:            "KubeletNotReady",
-				Message:           aggregatedErr.Error(),
+				Message:           strings.Join(rs, ","),
 				LastHeartbeatTime: currentTime,
 			}
 		}
@@ -518,7 +515,7 @@ func ReadyCondition(
 				recordEventFunc(v1.EventTypeNormal, events.NodeReady)
 			} else {
 				recordEventFunc(v1.EventTypeNormal, events.NodeNotReady)
-				klog.Infof("Node became not ready: %+v", newNodeReadyCondition)
+				glog.Infof("Node became not ready: %+v", newNodeReadyCondition)
 			}
 		}
 		return nil
@@ -708,6 +705,45 @@ func DiskPressureCondition(nowFunc func() time.Time, // typically Kubelet.clock.
 	}
 }
 
+// OutOfDiskCondition returns a Setter that updates the v1.NodeOutOfDisk condition on the node.
+// TODO(#65658): remove this condition
+func OutOfDiskCondition(nowFunc func() time.Time, // typically Kubelet.clock.Now
+	recordEventFunc func(eventType, event string), // typically Kubelet.recordNodeStatusEvent
+) Setter {
+	return func(node *v1.Node) error {
+		currentTime := metav1.NewTime(nowFunc())
+		var nodeOODCondition *v1.NodeCondition
+
+		// Check if NodeOutOfDisk condition already exists and if it does, just pick it up for update.
+		for i := range node.Status.Conditions {
+			if node.Status.Conditions[i].Type == v1.NodeOutOfDisk {
+				nodeOODCondition = &node.Status.Conditions[i]
+			}
+		}
+
+		newOODCondition := nodeOODCondition == nil
+		if newOODCondition {
+			nodeOODCondition = &v1.NodeCondition{}
+		}
+		if nodeOODCondition.Status != v1.ConditionFalse {
+			nodeOODCondition.Type = v1.NodeOutOfDisk
+			nodeOODCondition.Status = v1.ConditionFalse
+			nodeOODCondition.Reason = "KubeletHasSufficientDisk"
+			nodeOODCondition.Message = "kubelet has sufficient disk space available"
+			nodeOODCondition.LastTransitionTime = currentTime
+			recordEventFunc(v1.EventTypeNormal, "NodeHasSufficientDisk")
+		}
+
+		// Update the heartbeat time irrespective of all the conditions.
+		nodeOODCondition.LastHeartbeatTime = currentTime
+
+		if newOODCondition {
+			node.Status.Conditions = append(node.Status.Conditions, *nodeOODCondition)
+		}
+		return nil
+	}
+}
+
 // VolumesInUse returns a Setter that updates the volumes in use on the node.
 func VolumesInUse(syncedFunc func() bool, // typically Kubelet.volumeManager.ReconcilerStatesHasBeenSynced
 	volumesInUseFunc func() []v1.UniqueVolumeName, // typically Kubelet.volumeManager.GetVolumesInUse
@@ -736,7 +772,7 @@ func VolumeLimits(volumePluginListFunc func() []volume.VolumePluginWithAttachLim
 		for _, volumePlugin := range pluginWithLimits {
 			attachLimits, err := volumePlugin.GetVolumeLimits()
 			if err != nil {
-				klog.V(4).Infof("Error getting volume limit for plugin %s", volumePlugin.GetPluginName())
+				glog.V(4).Infof("Error getting volume limit for plugin %s", volumePlugin.GetPluginName())
 				continue
 			}
 			for limitKey, value := range attachLimits {
@@ -744,21 +780,6 @@ func VolumeLimits(volumePluginListFunc func() []volume.VolumePluginWithAttachLim
 				node.Status.Allocatable[v1.ResourceName(limitKey)] = *resource.NewQuantity(value, resource.DecimalSI)
 			}
 		}
-		return nil
-	}
-}
-
-// RemoveOutOfDiskCondition removes stale OutOfDisk condition
-// OutOfDisk condition has been removed from kubelet in 1.12
-func RemoveOutOfDiskCondition() Setter {
-	return func(node *v1.Node) error {
-		var conditions []v1.NodeCondition
-		for i := range node.Status.Conditions {
-			if node.Status.Conditions[i].Type != v1.NodeOutOfDisk {
-				conditions = append(conditions, node.Status.Conditions[i])
-			}
-		}
-		node.Status.Conditions = conditions
 		return nil
 	}
 }

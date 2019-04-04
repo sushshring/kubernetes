@@ -1,5 +1,3 @@
-# See the OWNERS docs at https://go.k8s.io/owners
-
 reviewers:
 - bowei
 - MrHohn
@@ -14,5 +12,3 @@ approvers:
 - matchstick
 - andrewsykim
 - cheftako
-labels:
-- sig/network

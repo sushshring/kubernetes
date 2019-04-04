@@ -33,10 +33,6 @@ type ClusterComputeResource struct {
 	ruleKey int32
 }
 
-func (c *ClusterComputeResource) RenameTask(req *types.Rename_Task) soap.HasFault {
-	return RenameTask(c, req)
-}
-
 type addHost struct {
 	*ClusterComputeResource
 
@@ -304,7 +300,6 @@ func CreateClusterComputeResource(f *Folder, name string, spec types.ClusterConf
 	}
 
 	cluster := &ClusterComputeResource{}
-	cluster.EnvironmentBrowser = newEnvironmentBrowser()
 	cluster.Name = name
 	cluster.Summary = &types.ClusterComputeResourceSummary{
 		UsageSummary: new(types.ClusterUsageSummary),

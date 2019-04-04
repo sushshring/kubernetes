@@ -22,7 +22,6 @@ go_library(
     name = "go_default_library",
     srcs = [
         "create.go",
-        "create_update.go",
         "delete.go",
         "doc.go",
         "export.go",

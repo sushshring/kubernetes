@@ -74,16 +74,16 @@ func Test(t *testing.T) {
 	}
 	provider.loadConfig(bytes.NewBufferString(configStr))
 
-	creds := provider.Provide("")
+	creds := provider.Provide()
 
-	if len(creds) != len(result)+1 {
-		t.Errorf("Unexpected list: %v, expected length %d", creds, len(result)+1)
+	if len(creds) != len(result) {
+		t.Errorf("Unexpected list: %v, expected length %d", creds, len(result))
 	}
 	for _, cred := range creds {
-		if cred.Username != "" && cred.Username != "foo" {
+		if cred.Username != "foo" {
 			t.Errorf("expected 'foo' for username, saw: %v", cred.Username)
 		}
-		if cred.Password != "" && cred.Password != "bar" {
+		if cred.Password != "bar" {
 			t.Errorf("expected 'bar' for password, saw: %v", cred.Username)
 		}
 	}

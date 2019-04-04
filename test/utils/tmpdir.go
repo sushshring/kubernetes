@@ -19,7 +19,7 @@ package utils
 import (
 	"io/ioutil"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 func MakeTempDirOrDie(prefix string, baseDir string) string {
@@ -28,7 +28,7 @@ func MakeTempDirOrDie(prefix string, baseDir string) string {
 	}
 	tempDir, err := ioutil.TempDir(baseDir, prefix)
 	if err != nil {
-		klog.Fatalf("Can't make a temp rootdir: %v", err)
+		glog.Fatalf("Can't make a temp rootdir: %v", err)
 	}
 	return tempDir
 }

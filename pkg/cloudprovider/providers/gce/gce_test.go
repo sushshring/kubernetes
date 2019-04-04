@@ -91,7 +91,7 @@ func TestGetRegion(t *testing.T) {
 	if regionName != "us-central1" {
 		t.Errorf("Unexpected region from GetGCERegion: %s", regionName)
 	}
-	gce := &Cloud{
+	gce := &GCECloud{
 		localZone: zoneName,
 		region:    regionName,
 	}
@@ -299,7 +299,7 @@ func TestGetZoneByProviderID(t *testing.T) {
 		},
 	}
 
-	gce := &Cloud{
+	gce := &GCECloud{
 		localZone: "us-central1-f",
 		region:    "us-central1",
 	}
@@ -331,13 +331,13 @@ func TestGenerateCloudConfigs(t *testing.T) {
 		NodeInstancePrefix: "node-prefix",
 		Multizone:          false,
 		Regional:           false,
-		APIEndpoint:        "",
+		ApiEndpoint:        "",
 		LocalZone:          "us-central1-a",
 		AlphaFeatures:      []string{},
 	}
 
 	cloudBoilerplate := CloudConfig{
-		APIEndpoint:        "",
+		ApiEndpoint:        "",
 		ProjectID:          "project-id",
 		NetworkProjectID:   "",
 		Region:             "us-central1",
@@ -395,12 +395,12 @@ func TestGenerateCloudConfigs(t *testing.T) {
 			name: "Specified API Endpint",
 			config: func() ConfigGlobal {
 				v := configBoilerplate
-				v.APIEndpoint = "https://www.googleapis.com/compute/staging_v1/"
+				v.ApiEndpoint = "https://www.googleapis.com/compute/staging_v1/"
 				return v
 			},
 			cloud: func() CloudConfig {
 				v := cloudBoilerplate
-				v.APIEndpoint = "https://www.googleapis.com/compute/staging_v1/"
+				v.ApiEndpoint = "https://www.googleapis.com/compute/staging_v1/"
 				return v
 			},
 		},

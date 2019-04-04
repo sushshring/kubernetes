@@ -25,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apiserver/pkg/registry/generic"
-	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/apiserver/pkg/storage"
 	"k8s.io/apiserver/pkg/storage/names"
 
@@ -38,11 +37,7 @@ type apiServerStrategy struct {
 	names.NameGenerator
 }
 
-// apiServerStrategy must implement rest.RESTCreateUpdateStrategy
-var _ rest.RESTCreateUpdateStrategy = apiServerStrategy{}
-
-// NewStrategy creates a new apiServerStrategy.
-func NewStrategy(typer runtime.ObjectTyper) rest.RESTCreateUpdateStrategy {
+func NewStrategy(typer runtime.ObjectTyper) apiServerStrategy {
 	return apiServerStrategy{typer, names.SimpleNameGenerator}
 }
 
@@ -90,8 +85,7 @@ type apiServerStatusStrategy struct {
 	names.NameGenerator
 }
 
-// NewStatusStrategy creates a new apiServerStatusStrategy.
-func NewStatusStrategy(typer runtime.ObjectTyper) rest.RESTUpdateStrategy {
+func NewStatusStrategy(typer runtime.ObjectTyper) apiServerStatusStrategy {
 	return apiServerStatusStrategy{typer, names.SimpleNameGenerator}
 }
 
@@ -117,22 +111,19 @@ func (apiServerStatusStrategy) AllowUnconditionalUpdate() bool {
 	return false
 }
 
-// Canonicalize normalizes the object after validation.
 func (apiServerStatusStrategy) Canonicalize(obj runtime.Object) {
 }
 
-// ValidateUpdate validates an update of apiServerStatusStrategy.
 func (apiServerStatusStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
 	return validation.ValidateAPIServiceStatusUpdate(obj.(*apiregistration.APIService), old.(*apiregistration.APIService))
 }
 
-// GetAttrs returns the labels and fields of an API server for filtering purposes.
-func GetAttrs(obj runtime.Object) (labels.Set, fields.Set, error) {
+func GetAttrs(obj runtime.Object) (labels.Set, fields.Set, bool, error) {
 	apiserver, ok := obj.(*apiregistration.APIService)
 	if !ok {
-		return nil, nil, fmt.Errorf("given object is not a APIService")
+		return nil, nil, false, fmt.Errorf("given object is not a APIService.")
 	}
-	return labels.Set(apiserver.ObjectMeta.Labels), ToSelectableFields(apiserver), nil
+	return labels.Set(apiserver.ObjectMeta.Labels), APIServiceToSelectableFields(apiserver), apiserver.Initializers != nil, nil
 }
 
 // MatchAPIService is the filter used by the generic etcd backend to watch events
@@ -145,7 +136,7 @@ func MatchAPIService(label labels.Selector, field fields.Selector) storage.Selec
 	}
 }
 
-// ToSelectableFields returns a field set that represents the object.
-func ToSelectableFields(obj *apiregistration.APIService) fields.Set {
+// APIServiceToSelectableFields returns a field set that represents the object.
+func APIServiceToSelectableFields(obj *apiregistration.APIService) fields.Set {
 	return generic.ObjectMetaFieldsSet(&obj.ObjectMeta, true)
 }

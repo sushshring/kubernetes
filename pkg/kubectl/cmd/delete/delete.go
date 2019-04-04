@@ -21,25 +21,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	"k8s.io/klog"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/printers"
-	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/cli-runtime/pkg/genericclioptions/printers"
+	"k8s.io/cli-runtime/pkg/genericclioptions/resource"
 	"k8s.io/client-go/dynamic"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	cmdwait "k8s.io/kubernetes/pkg/kubectl/cmd/wait"
+	kubectlwait "k8s.io/kubernetes/pkg/kubectl/cmd/wait"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/kubectl/util/templates"
 )
 
 var (
-	deleteLong = templates.LongDesc(i18n.T(`
+	delete_long = templates.LongDesc(i18n.T(`
 		Delete resources by filenames, stdin, resources and names, or by resources and label selector.
 
 		JSON and YAML formats are accepted. Only one type of the arguments may be specified: filenames,
@@ -67,12 +67,9 @@ var (
 		update to a resource right when you submit a delete, their update will be lost along with the
 		rest of the resource.`))
 
-	deleteExample = templates.Examples(i18n.T(`
+	delete_example = templates.Examples(i18n.T(`
 		# Delete a pod using the type and name specified in pod.json.
 		kubectl delete -f ./pod.json
-
-		# Delete resources from a directory containing kustomization.yaml - e.g. dir/kustomization.yaml.
-		kubectl delete -k dir
 
 		# Delete a pod based on the type and name in the JSON passed into stdin.
 		cat pod.json | kubectl delete -f -
@@ -96,16 +93,14 @@ var (
 type DeleteOptions struct {
 	resource.FilenameOptions
 
-	LabelSelector       string
-	FieldSelector       string
-	DeleteAll           bool
-	DeleteAllNamespaces bool
-	IgnoreNotFound      bool
-	Cascade             bool
-	DeleteNow           bool
-	ForceDeletion       bool
-	WaitForDeletion     bool
-	Quiet               bool
+	LabelSelector   string
+	FieldSelector   string
+	DeleteAll       bool
+	IgnoreNotFound  bool
+	Cascade         bool
+	DeleteNow       bool
+	ForceDeletion   bool
+	WaitForDeletion bool
 
 	GracePeriod int
 	Timeout     time.Duration
@@ -123,15 +118,15 @@ func NewCmdDelete(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra
 	deleteFlags := NewDeleteCommandFlags("containing the resource to delete.")
 
 	cmd := &cobra.Command{
-		Use:                   "delete ([-f FILENAME] | [-k DIRECTORY] | TYPE [(NAME | -l label | --all)])",
+		Use:                   "delete ([-f FILENAME] | TYPE [(NAME | -l label | --all)])",
 		DisableFlagsInUseLine: true,
 		Short:                 i18n.T("Delete resources by filenames, stdin, resources and names, or by resources and label selector"),
-		Long:                  deleteLong,
-		Example:               deleteExample,
+		Long:                  delete_long,
+		Example:               delete_example,
 		Run: func(cmd *cobra.Command, args []string) {
 			o := deleteFlags.ToOptions(nil, streams)
 			cmdutil.CheckErr(o.Complete(f, args, cmd))
-			cmdutil.CheckErr(o.Validate())
+			cmdutil.CheckErr(o.Validate(cmd))
 			cmdutil.CheckErr(o.RunDelete())
 		},
 		SuggestFor: []string{"rm"},
@@ -167,6 +162,7 @@ func (o *DeleteOptions) Complete(f cmdutil.Factory, args []string, cmd *cobra.Co
 		o.GracePeriod = 1
 	}
 
+	includeUninitialized := cmdutil.ShouldIncludeUninitialized(cmd, false)
 	r := f.NewBuilder().
 		Unstructured().
 		ContinueOnError().
@@ -174,8 +170,8 @@ func (o *DeleteOptions) Complete(f cmdutil.Factory, args []string, cmd *cobra.Co
 		FilenameParam(enforceNamespace, &o.FilenameOptions).
 		LabelSelectorParam(o.LabelSelector).
 		FieldSelectorParam(o.FieldSelector).
+		IncludeUninitialized(includeUninitialized).
 		SelectAllParam(o.DeleteAll).
-		AllNamespaces(o.DeleteAllNamespaces).
 		ResourceTypeOrNameArgs(false, args...).RequireObject(false).
 		Flatten().
 		Do()
@@ -198,9 +194,9 @@ func (o *DeleteOptions) Complete(f cmdutil.Factory, args []string, cmd *cobra.Co
 	return nil
 }
 
-func (o *DeleteOptions) Validate() error {
+func (o *DeleteOptions) Validate(cmd *cobra.Command) error {
 	if o.Output != "" && o.Output != "name" {
-		return fmt.Errorf("unexpected -o output mode: %v. We only support '-o name'", o.Output)
+		return cmdutil.UsageErrorf(cmd, "Unexpected -o output mode: %v. We only support '-o name'.", o.Output)
 	}
 
 	if o.DeleteAll && len(o.LabelSelector) > 0 {
@@ -208,6 +204,11 @@ func (o *DeleteOptions) Validate() error {
 	}
 	if o.DeleteAll && len(o.FieldSelector) > 0 {
 		return fmt.Errorf("cannot set --all and --field-selector at the same time")
+	}
+
+	if o.GracePeriod == 0 && !o.ForceDeletion && !o.WaitForDeletion {
+		// With the explicit --wait flag we need extra validation for backward compatibility
+		return fmt.Errorf("--grace-period=0 must have either --force specified, or --wait to be set to true")
 	}
 
 	switch {
@@ -229,7 +230,7 @@ func (o *DeleteOptions) DeleteResult(r *resource.Result) error {
 		r = r.IgnoreErrors(errors.IsNotFound)
 	}
 	deletedInfos := []*resource.Info{}
-	uidMap := cmdwait.UIDMap{}
+	uidMap := kubectlwait.UIDMap{}
 	err := r.Visit(func(info *resource.Info, err error) error {
 		if err != nil {
 			return err
@@ -251,7 +252,7 @@ func (o *DeleteOptions) DeleteResult(r *resource.Result) error {
 		if err != nil {
 			return err
 		}
-		resourceLocation := cmdwait.ResourceLocation{
+		resourceLocation := kubectlwait.ResourceLocation{
 			GroupResource: info.Mapping.Resource.GroupResource(),
 			Namespace:     info.Namespace,
 			Name:          info.Name,
@@ -263,7 +264,7 @@ func (o *DeleteOptions) DeleteResult(r *resource.Result) error {
 		responseMetadata, err := meta.Accessor(response)
 		if err != nil {
 			// we don't have UID, but we didn't fail the delete, next best thing is just skipping the UID
-			klog.V(1).Info(err)
+			glog.V(1).Info(err)
 			return nil
 		}
 		uidMap[resourceLocation] = responseMetadata.GetUID()
@@ -291,21 +292,21 @@ func (o *DeleteOptions) DeleteResult(r *resource.Result) error {
 		// if we requested to wait forever, set it to a week.
 		effectiveTimeout = 168 * time.Hour
 	}
-	waitOptions := cmdwait.WaitOptions{
+	waitOptions := kubectlwait.WaitOptions{
 		ResourceFinder: genericclioptions.ResourceFinderForResult(resource.InfoListVisitor(deletedInfos)),
 		UIDMap:         uidMap,
 		DynamicClient:  o.DynamicClient,
 		Timeout:        effectiveTimeout,
 
 		Printer:     printers.NewDiscardingPrinter(),
-		ConditionFn: cmdwait.IsDeleted,
+		ConditionFn: kubectlwait.IsDeleted,
 		IOStreams:   o.IOStreams,
 	}
 	err = waitOptions.RunWait()
 	if errors.IsForbidden(err) || errors.IsMethodNotSupported(err) {
 		// if we're forbidden from waiting, we shouldn't fail.
 		// if the resource doesn't support a verb we need, we shouldn't fail.
-		klog.V(1).Info(err)
+		glog.V(1).Info(err)
 		return nil
 	}
 	return err
@@ -317,13 +318,11 @@ func (o *DeleteOptions) deleteResource(info *resource.Info, deleteOptions *metav
 		return nil, cmdutil.AddSourceToErr("deleting", info.Source, err)
 	}
 
-	if !o.Quiet {
-		o.PrintObj(info)
-	}
+	o.PrintObj(info)
 	return deleteResponse, nil
 }
 
-// PrintObj for deleted objects is special because we do not have an object to print.
+// deletion printing is special because we do not have an object to print.
 // This mirrors name printer behavior
 func (o *DeleteOptions) PrintObj(info *resource.Info) {
 	operation := "deleted"

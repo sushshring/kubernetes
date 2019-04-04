@@ -21,7 +21,7 @@ import (
 	"os"
 	"strings"
 
-	errorsutil "k8s.io/apimachinery/pkg/util/errors"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 )
 
 const (
@@ -69,7 +69,7 @@ func checkErr(err error, handleErr func(string, int)) {
 		return
 	case preflightError:
 		handleErr(err.Error(), PreFlightExitCode)
-	case errorsutil.Aggregate:
+	case utilerrors.Aggregate:
 		handleErr(err.Error(), ValidationExitCode)
 
 	default:

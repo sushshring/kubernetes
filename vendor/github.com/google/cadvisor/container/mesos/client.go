@@ -70,11 +70,6 @@ func Client() (mesosAgentClient, error) {
 			),
 		}
 	})
-
-	_, err := mesosClient.getVersion()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get version")
-	}
 	return mesosClient, nil
 }
 
@@ -139,20 +134,6 @@ func (self *client) getContainer(id string) (*mContainer, error) {
 	return nil, fmt.Errorf("can't locate container %s", id)
 }
 
-func (self *client) getVersion() (string, error) {
-	req := calls.NonStreaming(calls.GetVersion())
-	result, err := self.fetchAndDecode(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to get mesos version: %v", err)
-	}
-	version := result.GetVersion
-
-	if version == nil {
-		return "", fmt.Errorf("failed to get mesos version")
-	}
-	return version.VersionInfo.Version, nil
-}
-
 func (self *client) getContainers() (mContainers, error) {
 	req := calls.NonStreaming(calls.GetContainers())
 	result, err := self.fetchAndDecode(req)
@@ -160,10 +141,6 @@ func (self *client) getContainers() (mContainers, error) {
 		return nil, fmt.Errorf("failed to get mesos containers: %v", err)
 	}
 	cntrs := result.GetContainers
-
-	if cntrs == nil {
-		return nil, fmt.Errorf("failed to get mesos containers")
-	}
 	return cntrs, nil
 }
 

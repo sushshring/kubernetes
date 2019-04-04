@@ -13,14 +13,10 @@ import (
 
 //MatchAllElements succeeds if every element of a slice matches the element matcher it maps to
 //through the id function, and every element matcher is matched.
-//    idFn := func(element interface{}) string {
-//        return fmt.Sprintf("%v", element)
-//    }
-//
-//    Expect([]string{"a", "b"}).To(MatchAllElements(idFn, Elements{
-//        "a": Equal("a"),
-//        "b": Equal("b"),
-//    }))
+//  Expect([]string{"a", "b"}).To(MatchAllElements(idFn, matchers.Elements{
+//      "a": BeEqual("a"),
+//      "b": BeEqual("b"),
+//  })
 func MatchAllElements(identifier Identifier, elements Elements) types.GomegaMatcher {
 	return &ElementsMatcher{
 		Identifier: identifier,
@@ -30,27 +26,16 @@ func MatchAllElements(identifier Identifier, elements Elements) types.GomegaMatc
 
 //MatchElements succeeds if each element of a slice matches the element matcher it maps to
 //through the id function. It can ignore extra elements and/or missing elements.
-//    idFn := func(element interface{}) string {
-//        return fmt.Sprintf("%v", element)
-//    }
-//
-//    Expect([]string{"a", "b", "c"}).To(MatchElements(idFn, IgnoreExtras, Elements{
-//        "a": Equal("a"),
-//        "b": Equal("b"),
-//    }))
-//    Expect([]string{"a", "c"}).To(MatchElements(idFn, IgnoreMissing, Elements{
-//        "a": Equal("a"),
-//        "b": Equal("b"),
-//        "c": Equal("c"),
-//        "d": Equal("d"),
-//    }))
+//  Expect([]string{"a", "c"}).To(MatchElements(idFn, IgnoreMissing|IgnoreExtra, matchers.Elements{
+//      "a": BeEqual("a")
+//      "b": BeEqual("b"),
+//  })
 func MatchElements(identifier Identifier, options Options, elements Elements) types.GomegaMatcher {
 	return &ElementsMatcher{
-		Identifier:      identifier,
-		Elements:        elements,
-		IgnoreExtras:    options&IgnoreExtras != 0,
-		IgnoreMissing:   options&IgnoreMissing != 0,
-		AllowDuplicates: options&AllowDuplicates != 0,
+		Identifier:    identifier,
+		Elements:      elements,
+		IgnoreExtras:  options&IgnoreExtras != 0,
+		IgnoreMissing: options&IgnoreMissing != 0,
 	}
 }
 
@@ -67,8 +52,6 @@ type ElementsMatcher struct {
 	IgnoreExtras bool
 	// Whether to ignore missing elements or consider it an error.
 	IgnoreMissing bool
-	// Whether to key duplicates when matching IDs.
-	AllowDuplicates bool
 
 	// State.
 	failures []error
@@ -105,11 +88,10 @@ func (m *ElementsMatcher) matchElements(actual interface{}) (errs []error) {
 	for i := 0; i < val.Len(); i++ {
 		element := val.Index(i).Interface()
 		id := m.Identifier(element)
+		// TODO: Add options to ignore & match duplicates.
 		if elements[id] {
-			if !m.AllowDuplicates {
-				errs = append(errs, fmt.Errorf("found duplicate element ID %s", id))
-				continue
-			}
+			errs = append(errs, fmt.Errorf("found duplicate element ID %s", id))
+			continue
 		}
 		elements[id] = true
 

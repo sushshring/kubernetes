@@ -25,14 +25,15 @@ import (
 	extensions "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	utilfeaturetesting "k8s.io/apiserver/pkg/util/feature/testing"
+	"k8s.io/kubernetes/pkg/api/testapi"
 	"k8s.io/kubernetes/pkg/features"
+	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 )
 
 func newPod(podName string, nodeName string, label map[string]string) *v1.Pod {
 	pod := &v1.Pod{
-		TypeMeta: metav1.TypeMeta{APIVersion: "v1"},
+		TypeMeta: metav1.TypeMeta{APIVersion: testapi.Extensions.GroupVersion().String()},
 		ObjectMeta: metav1.ObjectMeta{
 			Labels:    label,
 			Namespace: metav1.NamespaceDefault,
@@ -153,7 +154,7 @@ func TestCreatePodTemplate(t *testing.T) {
 	}
 	for _, test := range tests {
 		podTemplateSpec := v1.PodTemplateSpec{}
-		newPodTemplate := CreatePodTemplate(podTemplateSpec, test.templateGeneration, test.hash)
+		newPodTemplate := CreatePodTemplate("", podTemplateSpec, test.templateGeneration, test.hash)
 		val, exists := newPodTemplate.ObjectMeta.Labels[extensions.DaemonSetTemplateGenerationKey]
 		if !exists || val != fmt.Sprint(*test.templateGeneration) {
 			t.Errorf("Expected podTemplateSpec to have generation label value: %d, got: %s", *test.templateGeneration, val)
@@ -208,7 +209,7 @@ func TestReplaceDaemonSetPodNodeNameNodeAffinity(t *testing.T) {
 							{
 								MatchExpressions: []v1.NodeSelectorRequirement{
 									{
-										Key:      v1.LabelHostname,
+										Key:      kubeletapis.LabelHostname,
 										Operator: v1.NodeSelectorOpIn,
 										Values:   []string{"host_1"},
 									},
@@ -245,7 +246,7 @@ func TestReplaceDaemonSetPodNodeNameNodeAffinity(t *testing.T) {
 							Preference: v1.NodeSelectorTerm{
 								MatchExpressions: []v1.NodeSelectorRequirement{
 									{
-										Key:      v1.LabelHostname,
+										Key:      kubeletapis.LabelHostname,
 										Operator: v1.NodeSelectorOpIn,
 										Values:   []string{"host_1"},
 									},
@@ -263,7 +264,7 @@ func TestReplaceDaemonSetPodNodeNameNodeAffinity(t *testing.T) {
 							Preference: v1.NodeSelectorTerm{
 								MatchExpressions: []v1.NodeSelectorRequirement{
 									{
-										Key:      v1.LabelHostname,
+										Key:      kubeletapis.LabelHostname,
 										Operator: v1.NodeSelectorOpIn,
 										Values:   []string{"host_1"},
 									},
@@ -481,12 +482,17 @@ func TestReplaceDaemonSetPodNodeNameNodeAffinity(t *testing.T) {
 
 func forEachFeatureGate(t *testing.T, tf func(t *testing.T), gates ...utilfeature.Feature) {
 	for _, fg := range gates {
-		for _, f := range []bool{true, false} {
-			func() {
-				defer utilfeaturetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, fg, f)()
-				t.Run(fmt.Sprintf("%v (%t)", fg, f), tf)
+		func() {
+			enabled := utilfeature.DefaultFeatureGate.Enabled(fg)
+			defer func() {
+				utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%v=%t", fg, enabled))
 			}()
-		}
+
+			for _, f := range []bool{true, false} {
+				utilfeature.DefaultFeatureGate.Set(fmt.Sprintf("%v=%t", fg, f))
+				t.Run(fmt.Sprintf("%v (%t)", fg, f), tf)
+			}
+		}()
 	}
 }
 

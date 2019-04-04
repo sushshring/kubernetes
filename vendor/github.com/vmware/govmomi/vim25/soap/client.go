@@ -656,8 +656,6 @@ func (c *Client) Upload(ctx context.Context, f io.Reader, u *url.URL, param *Upl
 		return err
 	}
 
-	defer res.Body.Close()
-
 	switch res.StatusCode {
 	case http.StatusOK:
 	case http.StatusCreated:

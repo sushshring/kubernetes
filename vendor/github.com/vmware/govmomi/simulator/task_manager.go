@@ -20,8 +20,6 @@ import (
 	"sync"
 
 	"github.com/vmware/govmomi/object"
-	"github.com/vmware/govmomi/simulator/esx"
-	"github.com/vmware/govmomi/simulator/vpx"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
 )
@@ -36,11 +34,6 @@ type TaskManager struct {
 func NewTaskManager(ref types.ManagedObjectReference) object.Reference {
 	s := &TaskManager{}
 	s.Self = ref
-	if Map.IsESX() {
-		s.Description = esx.Description
-	} else {
-		s.Description = vpx.Description
-	}
 	Map.AddHandler(s)
 	return s
 }

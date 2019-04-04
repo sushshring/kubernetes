@@ -24,7 +24,8 @@ go_library(
     ],
     importpath = "k8s.io/kubernetes/pkg/cloudprovider/providers/vsphere/vclib",
     deps = [
-        "//staging/src/k8s.io/client-go/pkg/version:go_default_library",
+        "//pkg/version:go_default_library",
+        "//vendor/github.com/golang/glog:go_default_library",
         "//vendor/github.com/prometheus/client_golang/prometheus:go_default_library",
         "//vendor/github.com/vmware/govmomi/find:go_default_library",
         "//vendor/github.com/vmware/govmomi/object:go_default_library",
@@ -37,7 +38,6 @@ go_library(
         "//vendor/github.com/vmware/govmomi/vim25/mo:go_default_library",
         "//vendor/github.com/vmware/govmomi/vim25/soap:go_default_library",
         "//vendor/github.com/vmware/govmomi/vim25/types:go_default_library",
-        "//vendor/k8s.io/klog:go_default_library",
     ],
 )
 

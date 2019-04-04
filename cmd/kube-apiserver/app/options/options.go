@@ -25,14 +25,15 @@ import (
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	genericoptions "k8s.io/apiserver/pkg/server/options"
 	"k8s.io/apiserver/pkg/storage/storagebackend"
-	cliflag "k8s.io/component-base/cli/flag"
+	apiserverflag "k8s.io/apiserver/pkg/util/flag"
 	api "k8s.io/kubernetes/pkg/apis/core"
-	_ "k8s.io/kubernetes/pkg/features" // add the kubernetes feature gates
 	kubeoptions "k8s.io/kubernetes/pkg/kubeapiserver/options"
 	kubeletclient "k8s.io/kubernetes/pkg/kubelet/client"
 	"k8s.io/kubernetes/pkg/master/ports"
 	"k8s.io/kubernetes/pkg/master/reconcilers"
-	"k8s.io/kubernetes/pkg/serviceaccount"
+
+	// add the kubernetes feature gates
+	_ "k8s.io/kubernetes/pkg/features"
 )
 
 // ServerRunOptions runs a kubernetes api server.
@@ -47,6 +48,7 @@ type ServerRunOptions struct {
 	Authentication          *kubeoptions.BuiltInAuthenticationOptions
 	Authorization           *kubeoptions.BuiltInAuthorizationOptions
 	CloudProvider           *kubeoptions.CloudProviderOptions
+	StorageSerialization    *kubeoptions.StorageSerializationOptions
 	APIEnablement           *genericoptions.APIEnablementOptions
 
 	AllowPrivileged           bool
@@ -68,9 +70,7 @@ type ServerRunOptions struct {
 	MasterCount            int
 	EndpointReconcilerType string
 
-	ServiceAccountSigningKeyFile     string
-	ServiceAccountIssuer             serviceaccount.TokenGenerator
-	ServiceAccountTokenMaxExpiration time.Duration
+	ServiceAccountSigningKeyFile string
 }
 
 // NewServerRunOptions creates a new ServerRunOptions object with default parameters
@@ -86,6 +86,7 @@ func NewServerRunOptions() *ServerRunOptions {
 		Authentication:          kubeoptions.NewBuiltInAuthenticationOptions().WithAll(),
 		Authorization:           kubeoptions.NewBuiltInAuthorizationOptions(),
 		CloudProvider:           kubeoptions.NewCloudProviderOptions(),
+		StorageSerialization:    kubeoptions.NewStorageSerializationOptions(),
 		APIEnablement:           genericoptions.NewAPIEnablementOptions(),
 
 		EnableLogsHandler:      true,
@@ -121,7 +122,7 @@ func NewServerRunOptions() *ServerRunOptions {
 }
 
 // Flags returns flags for a specific APIServer by section name
-func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
+func (s *ServerRunOptions) Flags() (fss apiserverflag.NamedFlagSets) {
 	// Add the generic flags.
 	s.GenericServerRunOptions.AddUniversalFlags(fss.FlagSet("generic"))
 	s.Etcd.AddFlags(fss.FlagSet("etcd"))
@@ -133,6 +134,7 @@ func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
 	s.Authentication.AddFlags(fss.FlagSet("authentication"))
 	s.Authorization.AddFlags(fss.FlagSet("authorization"))
 	s.CloudProvider.AddFlags(fss.FlagSet("cloud provider"))
+	s.StorageSerialization.AddFlags(fss.FlagSet("storage"))
 	s.APIEnablement.AddFlags(fss.FlagSet("api enablement"))
 	s.Admission.AddFlags(fss.FlagSet("admission"))
 
@@ -208,6 +210,11 @@ func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
 
 	fs.StringVar(&s.KubeletConfig.CAFile, "kubelet-certificate-authority", s.KubeletConfig.CAFile,
 		"Path to a cert file for the certificate authority.")
+
+	// TODO: delete this flag in 1.13
+	repair := false
+	fs.BoolVar(&repair, "repair-malformed-updates", false, "deprecated")
+	fs.MarkDeprecated("repair-malformed-updates", "This flag will be removed in a future version")
 
 	fs.StringVar(&s.ProxyClientCertFile, "proxy-client-cert-file", s.ProxyClientCertFile, ""+
 		"Client certificate used to prove the identity of the aggregator or kube-apiserver "+

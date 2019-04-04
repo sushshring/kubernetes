@@ -18,6 +18,11 @@ limitations under the License.
 
 package kuberuntime
 
+import (
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	kubefeatures "k8s.io/kubernetes/pkg/features"
+)
+
 const (
 	// Taken from lmctfy https://github.com/google/lmctfy/blob/master/lmctfy/controllers/cpu_controller.cc
 	minShares     = 2
@@ -53,6 +58,9 @@ func milliCPUToQuota(milliCPU int64, period int64) (quota int64) {
 	// see https://www.kernel.org/doc/Documentation/scheduler/sched-bwc.txt for details
 	if milliCPU == 0 {
 		return
+	}
+	if !utilfeature.DefaultFeatureGate.Enabled(kubefeatures.CPUCFSQuotaPeriod) {
+		period = quotaPeriod
 	}
 
 	// we then convert your milliCPU to a value normalized over a period

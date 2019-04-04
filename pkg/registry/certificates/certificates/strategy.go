@@ -40,7 +40,7 @@ type csrStrategy struct {
 // CSR objects.
 var Strategy = csrStrategy{legacyscheme.Scheme, names.SimpleNameGenerator}
 
-// NamespaceScoped is false for CSRs.
+// NamespaceScoped is true for CSRs.
 func (csrStrategy) NamespaceScoped() bool {
 	return false
 }

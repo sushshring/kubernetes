@@ -86,7 +86,6 @@ type autoscalerStatusStrategy struct {
 	autoscalerStrategy
 }
 
-// StatusStrategy is the default logic invoked when updating object status.
 var StatusStrategy = autoscalerStatusStrategy{Strategy}
 
 func (autoscalerStatusStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Object) {

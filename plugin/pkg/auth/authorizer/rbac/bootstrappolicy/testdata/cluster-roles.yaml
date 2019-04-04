@@ -211,7 +211,6 @@ items:
   - apiGroups:
     - networking.k8s.io
     resources:
-    - ingresses
     - networkpolicies
     verbs:
     - create
@@ -272,7 +271,6 @@ items:
   - apiGroups:
     - apps
     resources:
-    - controllerrevisions
     - daemonsets
     - deployments
     - deployments/scale
@@ -327,7 +325,6 @@ items:
   - apiGroups:
     - networking.k8s.io
     resources:
-    - ingresses
     - networkpolicies
     verbs:
     - get
@@ -355,6 +352,31 @@ items:
     - subjectaccessreviews
     verbs:
     - create
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRole
+  metadata:
+    annotations:
+      rbac.authorization.kubernetes.io/autoupdate: "true"
+    creationTimestamp: null
+    labels:
+      kubernetes.io/bootstrapping: rbac-defaults
+    name: system:aws-cloud-provider
+  rules:
+  - apiGroups:
+    - ""
+    resources:
+    - nodes
+    verbs:
+    - get
+    - patch
+  - apiGroups:
+    - ""
+    resources:
+    - events
+    verbs:
+    - create
+    - patch
+    - update
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: ClusterRole
   metadata:
@@ -509,14 +531,6 @@ items:
     - get
     - list
     - watch
-  - apiGroups:
-    - storage.k8s.io
-    resources:
-    - csinodes
-    verbs:
-    - get
-    - list
-    - watch
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: ClusterRole
   metadata:
@@ -535,6 +549,10 @@ items:
     - /healthz
     - /openapi
     - /openapi/*
+    - /swagger-2.0.0.pb-v1
+    - /swagger.json
+    - /swaggerapi
+    - /swaggerapi/*
     - /version
     - /version/
     verbs:
@@ -644,24 +662,12 @@ items:
     verbs:
     - create
   - apiGroups:
-    - authorization.k8s.io
-    resources:
-    - subjectaccessreviews
-    verbs:
-    - create
-  - apiGroups:
     - '*'
     resources:
     - '*'
     verbs:
     - list
     - watch
-  - apiGroups:
-    - ""
-    resources:
-    - serviceaccounts/token
-    verbs:
-    - create
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: ClusterRole
   metadata:
@@ -789,18 +795,6 @@ items:
     - get
     - list
     - watch
-  - apiGroups:
-    - authentication.k8s.io
-    resources:
-    - tokenreviews
-    verbs:
-    - create
-  - apiGroups:
-    - authorization.k8s.io
-    resources:
-    - subjectaccessreviews
-    verbs:
-    - create
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: ClusterRole
   metadata:
@@ -887,6 +881,7 @@ items:
     resources:
     - nodes
     verbs:
+    - delete
     - patch
     - update
   - apiGroups:
@@ -976,42 +971,6 @@ items:
     - volumeattachments
     verbs:
     - get
-  - apiGroups:
-    - storage.k8s.io
-    resources:
-    - csidrivers
-    verbs:
-    - get
-    - list
-    - watch
-  - apiGroups:
-    - storage.k8s.io
-    resources:
-    - csinodes
-    verbs:
-    - create
-    - delete
-    - get
-    - patch
-    - update
-  - apiGroups:
-    - coordination.k8s.io
-    resources:
-    - leases
-    verbs:
-    - create
-    - delete
-    - get
-    - patch
-    - update
-  - apiGroups:
-    - node.k8s.io
-    resources:
-    - runtimeclasses
-    verbs:
-    - get
-    - list
-    - watch
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: ClusterRole
   metadata:
@@ -1144,22 +1103,6 @@ items:
     - create
     - patch
     - update
-- apiVersion: rbac.authorization.k8s.io/v1
-  kind: ClusterRole
-  metadata:
-    annotations:
-      rbac.authorization.kubernetes.io/autoupdate: "true"
-    creationTimestamp: null
-    labels:
-      kubernetes.io/bootstrapping: rbac-defaults
-    name: system:public-info-viewer
-  rules:
-  - nonResourceURLs:
-    - /healthz
-    - /version
-    - /version/
-    verbs:
-    - get
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: ClusterRole
   metadata:

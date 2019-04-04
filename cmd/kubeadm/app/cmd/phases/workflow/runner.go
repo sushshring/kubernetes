@@ -21,7 +21,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -53,20 +52,12 @@ type Runner struct {
 
 	// runDataInitializer defines a function that creates the runtime data shared
 	// among all the phases included in the workflow
-	runDataInitializer func(*cobra.Command, []string) (RunData, error)
+	runDataInitializer func() (RunData, error)
 
 	// runData is part of the internal state of the runner and it is used for implementing
 	// a singleton in the InitData methods (thus avoiding to initialize data
 	// more than one time)
 	runData RunData
-
-	// runCmd is part of the internal state of the runner and it is used to track the
-	// command that will trigger the runner (only if the runner is BindToCommand).
-	runCmd *cobra.Command
-
-	// cmdAdditionalFlags holds additional, shared flags that could be added to the subcommands generated
-	// for phases. Flags could be inherited from the parent command too or added directly to each phase
-	cmdAdditionalFlags *pflag.FlagSet
 
 	// phaseRunners is part of the internal state of the runner and provides
 	// a list of wrappers to phases composing the workflow with contextual
@@ -93,7 +84,7 @@ type phaseRunner struct {
 	selfPath []string
 
 	// generatedName is the full name of the phase, that corresponds to the absolute
-	// path of the phase in the workflow managed by the Runner.
+	// path of the phase in the the workflow managed by the Runner.
 	generatedName string
 
 	// use is the phase usage string that will be printed in the workflow help.
@@ -144,7 +135,7 @@ func (e *Runner) computePhaseRunFlags() (map[string]bool, error) {
 		}
 		for _, f := range e.Options.FilterPhases {
 			if _, ok := phaseRunFlags[f]; !ok {
-				return phaseRunFlags, errors.Errorf("invalid phase name: %s", f)
+				return phaseRunFlags, fmt.Errorf("invalid phase name: %s", f)
 			}
 			phaseRunFlags[f] = true
 			for _, c := range phaseHierarchy[f] {
@@ -157,7 +148,7 @@ func (e *Runner) computePhaseRunFlags() (map[string]bool, error) {
 	// to false and apply the same change to the underlying hierarchy
 	for _, f := range e.Options.SkipPhases {
 		if _, ok := phaseRunFlags[f]; !ok {
-			return phaseRunFlags, errors.Errorf("invalid phase name: %s", f)
+			return phaseRunFlags, fmt.Errorf("invalid phase name: %s", f)
 		}
 		phaseRunFlags[f] = false
 		for _, c := range phaseHierarchy[f] {
@@ -170,18 +161,17 @@ func (e *Runner) computePhaseRunFlags() (map[string]bool, error) {
 
 // SetDataInitializer allows to setup a function that initialize the runtime data shared
 // among all the phases included in the workflow.
-// The method will receive in input the cmd that triggers the Runner (only if the runner is BindToCommand)
-func (e *Runner) SetDataInitializer(builder func(cmd *cobra.Command, args []string) (RunData, error)) {
+func (e *Runner) SetDataInitializer(builder func() (RunData, error)) {
 	e.runDataInitializer = builder
 }
 
 // InitData triggers the creation of runtime data shared among all the phases included in the workflow.
 // This action can be executed explicitly out, when it is necessary to get the RunData
 // before actually executing Run, or implicitly when invoking Run.
-func (e *Runner) InitData(args []string) (RunData, error) {
+func (e *Runner) InitData() (RunData, error) {
 	if e.runData == nil && e.runDataInitializer != nil {
 		var err error
-		if e.runData, err = e.runDataInitializer(e.runCmd, args); err != nil {
+		if e.runData, err = e.runDataInitializer(); err != nil {
 			return nil, err
 		}
 	}
@@ -190,7 +180,7 @@ func (e *Runner) InitData(args []string) (RunData, error) {
 }
 
 // Run the kubeadm composable kubeadm workflows.
-func (e *Runner) Run(args []string) error {
+func (e *Runner) Run() error {
 	e.prepareForExecution()
 
 	// determine which phase should be run according to RunnerOptions
@@ -201,7 +191,7 @@ func (e *Runner) Run(args []string) error {
 
 	// builds the runner data
 	var data RunData
-	if data, err = e.InitData(args); err != nil {
+	if data, err = e.InitData(); err != nil {
 		return err
 	}
 
@@ -211,18 +201,12 @@ func (e *Runner) Run(args []string) error {
 			return nil
 		}
 
-		// Errors if phases that are meant to create special subcommands only
-		// are wrongly assigned Run Methods
-		if p.RunAllSiblings && (p.RunIf != nil || p.Run != nil) {
-			return errors.Wrapf(err, "phase marked as RunAllSiblings can not have Run functions %s", p.generatedName)
-		}
-
 		// If the phase defines a condition to be checked before executing the phase action.
 		if p.RunIf != nil {
 			// Check the condition and returns if the condition isn't satisfied (or fails)
 			ok, err := p.RunIf(data)
 			if err != nil {
-				return errors.Wrapf(err, "error execution run condition for phase %s", p.generatedName)
+				return fmt.Errorf("error execution run condition for phase %s: %v", p.generatedName, err)
 			}
 
 			if !ok {
@@ -233,7 +217,7 @@ func (e *Runner) Run(args []string) error {
 		// Runs the phase action (if defined)
 		if p.Run != nil {
 			if err := p.Run(data); err != nil {
-				return errors.Wrapf(err, "error execution phase %s", p.generatedName)
+				return fmt.Errorf("error execution phase %s: %v", p.generatedName, err)
 			}
 		}
 
@@ -250,7 +234,7 @@ func (e *Runner) Help(cmdUse string) string {
 	// computes the max length of for each phase use line
 	maxLength := 0
 	e.visitAll(func(p *phaseRunner) error {
-		if !p.Hidden && !p.RunAllSiblings {
+		if !p.Hidden {
 			length := len(p.use)
 			if maxLength < length {
 				maxLength = length
@@ -261,11 +245,11 @@ func (e *Runner) Help(cmdUse string) string {
 
 	// prints the list of phases indented by level and formatted using the maxlength
 	// the list is enclosed in a mardown code block for ensuring better readability in the public web site
-	line := fmt.Sprintf("The %q command executes the following phases:\n", cmdUse)
+	line := fmt.Sprintf("The %q command executes the following internal workflow:\n", cmdUse)
 	line += "```\n"
 	offset := 2
 	e.visitAll(func(p *phaseRunner) error {
-		if !p.Hidden && !p.RunAllSiblings {
+		if !p.Hidden {
 			padding := maxLength - len(p.use) + offset
 			line += strings.Repeat(" ", offset*p.level) // indentation
 			line += p.use                               // name + aliases
@@ -280,35 +264,29 @@ func (e *Runner) Help(cmdUse string) string {
 	return line
 }
 
-// SetAdditionalFlags allows to define flags to be added
-// to the subcommands generated for each phase (but not existing in the parent command).
-// Please note that this command needs to be done before BindToCommand.
-// Nb. if a flag is used only by one phase, please consider using phase LocalFlags.
-func (e *Runner) SetAdditionalFlags(fn func(*pflag.FlagSet)) {
-	// creates a new NewFlagSet
-	e.cmdAdditionalFlags = pflag.NewFlagSet("phaseAdditionalFlags", pflag.ContinueOnError)
-	// invokes the function that sets additional flags
-	fn(e.cmdAdditionalFlags)
-}
-
 // BindToCommand bind the Runner to a cobra command by altering
 // command help, adding phase related flags and by adding phases subcommands
 // Please note that this command needs to be done once all the phases are added to the Runner.
 func (e *Runner) BindToCommand(cmd *cobra.Command) {
-	// keep track of the command triggering the runner
-	e.runCmd = cmd
-
-	// return early if no phases were added
 	if len(e.Phases) == 0 {
 		return
 	}
 
-	e.prepareForExecution()
+	// alters the command description to show available phases
+	if cmd.Long != "" {
+		cmd.Long = fmt.Sprintf("%s\n\n%s\n", cmd.Long, e.Help(cmd.Use))
+	} else {
+		cmd.Long = fmt.Sprintf("%s\n\n%s\n", cmd.Short, e.Help(cmd.Use))
+	}
+
+	// adds phase related flags
+	cmd.Flags().StringSliceVar(&e.Options.SkipPhases, "skip-phases", nil, "List of phases to be skipped")
 
 	// adds the phases subcommand
 	phaseCommand := &cobra.Command{
 		Use:   "phase",
 		Short: fmt.Sprintf("use this command to invoke single phase of the %s workflow", cmd.Name()),
+		Args:  cobra.NoArgs, // this forces cobra to fail if a wrong phase name is passed
 	}
 
 	cmd.AddCommand(phaseCommand)
@@ -316,63 +294,26 @@ func (e *Runner) BindToCommand(cmd *cobra.Command) {
 	// generate all the nested subcommands for invoking single phases
 	subcommands := map[string]*cobra.Command{}
 	e.visitAll(func(p *phaseRunner) error {
-		// skip hidden phases
-		if p.Hidden {
-			return nil
-		}
-
-		// initialize phase selector
-		phaseSelector := p.generatedName
-
-		// if requested, set the phase to run all the sibling phases
-		if p.RunAllSiblings {
-			phaseSelector = p.parent.generatedName
-		}
-
-		// creates phase subcommand
-		phaseCmd := &cobra.Command{
+		// creates nested phase subcommand
+		var phaseCmd = &cobra.Command{
 			Use:     strings.ToLower(p.Name),
 			Short:   p.Short,
 			Long:    p.Long,
 			Example: p.Example,
-			Aliases: p.Aliases,
 			Run: func(cmd *cobra.Command, args []string) {
-				// if the phase has subphases, print the help and exits
-				if len(p.Phases) > 0 {
-					cmd.Help()
-					return
-				}
-
-				// overrides the command triggering the Runner using the phaseCmd
-				e.runCmd = cmd
-				e.Options.FilterPhases = []string{phaseSelector}
-				if err := e.Run(args); err != nil {
+				e.Options.FilterPhases = []string{p.generatedName}
+				if err := e.Run(); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(1)
 				}
 			},
+			Args: cobra.NoArgs, // this forces cobra to fail if a wrong phase name is passed
 		}
 
-		// makes the new command inherits local flags from the parent command
-		// Nb. global flags will be inherited automatically
-		inheritsFlags(cmd.Flags(), phaseCmd.Flags(), p.InheritFlags)
-
-		// makes the new command inherits additional flags for phases
-		if e.cmdAdditionalFlags != nil {
-			inheritsFlags(e.cmdAdditionalFlags, phaseCmd.Flags(), p.InheritFlags)
-		}
-
-		// If defined, added phase local flags
-		if p.LocalFlags != nil {
-			p.LocalFlags.VisitAll(func(f *pflag.Flag) {
-				phaseCmd.Flags().AddFlag(f)
-			})
-		}
-
-		// if this phase has children (not a leaf) it doesn't accept any args
-		if len(p.Phases) > 0 {
-			phaseCmd.Args = cobra.NoArgs
-		}
+		// makes the new command inherits flags from the main command
+		cmd.LocalNonPersistentFlags().VisitAll(func(f *pflag.Flag) {
+			phaseCmd.Flags().AddFlag(f)
+		})
 
 		// adds the command to parent
 		if p.level == 0 {
@@ -383,32 +324,6 @@ func (e *Runner) BindToCommand(cmd *cobra.Command) {
 
 		subcommands[p.generatedName] = phaseCmd
 		return nil
-	})
-
-	// alters the command description to show available phases
-	if cmd.Long != "" {
-		cmd.Long = fmt.Sprintf("%s\n\n%s\n", cmd.Long, e.Help(cmd.Use))
-	} else {
-		cmd.Long = fmt.Sprintf("%s\n\n%s\n", cmd.Short, e.Help(cmd.Use))
-	}
-
-	// adds phase related flags to the main command
-	cmd.Flags().StringSliceVar(&e.Options.SkipPhases, "skip-phases", nil, "List of phases to be skipped")
-}
-
-func inheritsFlags(sourceFlags, targetFlags *pflag.FlagSet, cmdFlags []string) {
-	// If the list of flag to be inherited from the parent command is not defined, no flag is added
-	if cmdFlags == nil {
-		return
-	}
-
-	// add all the flags to be inherited to the target flagSet
-	sourceFlags.VisitAll(func(f *pflag.Flag) {
-		for _, c := range cmdFlags {
-			if f.Name == c {
-				targetFlags.AddFlag(f)
-			}
-		}
 	})
 }
 
@@ -429,12 +344,6 @@ func (e *Runner) prepareForExecution() {
 	e.phaseRunners = []*phaseRunner{}
 	var parentRunner *phaseRunner
 	for _, phase := range e.Phases {
-		// skips phases that are meant to create special subcommands only
-		if phase.RunAllSiblings {
-			continue
-		}
-
-		// add phases to the execution list
 		addPhaseRunner(e, parentRunner, phase)
 	}
 }
@@ -442,8 +351,8 @@ func (e *Runner) prepareForExecution() {
 // addPhaseRunner adds the phaseRunner for a given phase to the phaseRunners list
 func addPhaseRunner(e *Runner, parentRunner *phaseRunner, phase Phase) {
 	// computes contextual information derived by the workflow managed by the Runner.
-	use := cleanName(phase.Name)
-	generatedName := use
+	generatedName := strings.ToLower(phase.Name)
+	use := generatedName
 	selfPath := []string{generatedName}
 
 	if parentRunner != nil {
@@ -470,14 +379,4 @@ func addPhaseRunner(e *Runner, parentRunner *phaseRunner, phase Phase) {
 	for _, childPhase := range phase.Phases {
 		addPhaseRunner(e, currentRunner, childPhase)
 	}
-}
-
-// cleanName makes phase name suitable for the runner help, by lowercasing the name
-// and removing args descriptors, if any
-func cleanName(name string) string {
-	ret := strings.ToLower(name)
-	if pos := strings.Index(ret, " "); pos != -1 {
-		ret = ret[:pos]
-	}
-	return ret
 }

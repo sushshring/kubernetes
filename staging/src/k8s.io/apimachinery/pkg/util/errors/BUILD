@@ -20,7 +20,6 @@ go_library(
     ],
     importmap = "k8s.io/kubernetes/vendor/k8s.io/apimachinery/pkg/util/errors",
     importpath = "k8s.io/apimachinery/pkg/util/errors",
-    deps = ["//staging/src/k8s.io/apimachinery/pkg/util/sets:go_default_library"],
 )
 
 filegroup(

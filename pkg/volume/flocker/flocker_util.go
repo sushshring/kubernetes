@@ -18,14 +18,15 @@ package flocker
 
 import (
 	"fmt"
+	"time"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 
-	volumehelpers "k8s.io/cloud-provider/volume/helpers"
+	volutil "k8s.io/kubernetes/pkg/volume/util"
 
 	flockerapi "github.com/clusterhq/flocker-go"
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 type flockerUtil struct{}
@@ -67,12 +68,13 @@ func (util *flockerUtil) CreateVolume(c *flockerVolumeProvisioner) (datasetUUID 
 	}
 
 	// select random node
+	rand.Seed(time.Now().UTC().UnixNano())
 	node := nodes[rand.Intn(len(nodes))]
-	klog.V(2).Infof("selected flocker node with UUID '%s' to provision dataset", node.UUID)
+	glog.V(2).Infof("selected flocker node with UUID '%s' to provision dataset", node.UUID)
 
 	capacity := c.options.PVC.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
 	requestBytes := capacity.Value()
-	volumeSizeGiB, err = volumehelpers.RoundUpToGiBInt(capacity)
+	volumeSizeGiB, err = volutil.RoundUpToGiBInt(capacity)
 	if err != nil {
 		return
 	}
@@ -92,7 +94,7 @@ func (util *flockerUtil) CreateVolume(c *flockerVolumeProvisioner) (datasetUUID 
 	}
 	datasetUUID = datasetState.DatasetID
 
-	klog.V(2).Infof("successfully created Flocker dataset with UUID '%s'", datasetUUID)
+	glog.V(2).Infof("successfully created Flocker dataset with UUID '%s'", datasetUUID)
 
 	return
 }

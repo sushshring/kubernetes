@@ -16,11 +16,7 @@ limitations under the License.
 
 package openstack
 
-import (
-	"sync"
-
-	"github.com/prometheus/client_golang/prometheus"
-)
+import "github.com/prometheus/client_golang/prometheus"
 
 const (
 	openstackSubsystem         = "openstack"
@@ -48,11 +44,7 @@ var (
 	)
 )
 
-var registerOnce sync.Once
-
 func registerMetrics() {
-	registerOnce.Do(func() {
-		prometheus.MustRegister(openstackOperationsLatency)
-		prometheus.MustRegister(openstackAPIRequestErrors)
-	})
+	prometheus.MustRegister(openstackOperationsLatency)
+	prometheus.MustRegister(openstackAPIRequestErrors)
 }

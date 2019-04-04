@@ -22,19 +22,20 @@ import (
 	"net"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	"github.com/golang/glog"
+
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	apiserveroptions "k8s.io/apiserver/pkg/server/options"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	apiserverflag "k8s.io/apiserver/pkg/util/flag"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
-	cliflag "k8s.io/component-base/cli/flag"
-	"k8s.io/klog"
 	ccmconfig "k8s.io/kubernetes/cmd/cloud-controller-manager/app/apis/config"
 	ccmconfigscheme "k8s.io/kubernetes/cmd/cloud-controller-manager/app/apis/config/scheme"
 	ccmconfigv1alpha1 "k8s.io/kubernetes/cmd/cloud-controller-manager/app/apis/config/v1alpha1"
@@ -43,7 +44,6 @@ import (
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/controller"
 	"k8s.io/kubernetes/pkg/master/ports"
-
 	// add the kubernetes feature gates
 	_ "k8s.io/kubernetes/pkg/features"
 )
@@ -82,10 +82,10 @@ func NewCloudControllerManagerOptions() (*CloudControllerManagerOptions, error) 
 	}
 
 	s := CloudControllerManagerOptions{
-		Generic:         cmoptions.NewGenericControllerManagerConfigurationOptions(&componentConfig.Generic),
-		KubeCloudShared: cmoptions.NewKubeCloudSharedOptions(&componentConfig.KubeCloudShared),
+		Generic:         cmoptions.NewGenericControllerManagerConfigurationOptions(componentConfig.Generic),
+		KubeCloudShared: cmoptions.NewKubeCloudSharedOptions(componentConfig.KubeCloudShared),
 		ServiceController: &cmoptions.ServiceControllerOptions{
-			ServiceControllerConfiguration: &componentConfig.ServiceController,
+			ConcurrentServiceSyncs: componentConfig.ServiceController.ConcurrentServiceSyncs,
 		},
 		SecureServing: apiserveroptions.NewSecureServingOptions().WithLoopback(),
 		InsecureServing: (&apiserveroptions.DeprecatedInsecureServingOptions{
@@ -102,8 +102,7 @@ func NewCloudControllerManagerOptions() (*CloudControllerManagerOptions, error) 
 	s.Authorization.RemoteKubeConfigFileOptional = true
 	s.Authorization.AlwaysAllowPaths = []string{"/healthz"}
 
-	// Set the PairName but leave certificate directory blank to generate in-memory by default
-	s.SecureServing.ServerCert.CertDirectory = ""
+	s.SecureServing.ServerCert.CertDirectory = "/var/run/kubernetes"
 	s.SecureServing.ServerCert.PairName = "cloud-controller-manager"
 	s.SecureServing.BindPort = ports.CloudControllerManagerPort
 
@@ -124,9 +123,11 @@ func NewDefaultComponentConfig(insecurePort int32) (*ccmconfig.CloudControllerMa
 }
 
 // Flags returns flags for a specific APIServer by section name
-func (o *CloudControllerManagerOptions) Flags(allControllers, disabledByDefaultControllers []string) cliflag.NamedFlagSets {
-	fss := cliflag.NamedFlagSets{}
-	o.Generic.AddFlags(&fss, allControllers, disabledByDefaultControllers)
+func (o *CloudControllerManagerOptions) Flags() apiserverflag.NamedFlagSets {
+	fss := apiserverflag.NamedFlagSets{}
+	o.Generic.AddFlags(&fss, []string{}, []string{})
+	// TODO: Implement the --controllers flag fully for the ccm
+	fss.FlagSet("generic").MarkHidden("controllers")
 	o.KubeCloudShared.AddFlags(fss.FlagSet("generic"))
 	o.ServiceController.AddFlags(fss.FlagSet("service controller"))
 
@@ -140,7 +141,7 @@ func (o *CloudControllerManagerOptions) Flags(allControllers, disabledByDefaultC
 	fs.StringVar(&o.Kubeconfig, "kubeconfig", o.Kubeconfig, "Path to kubeconfig file with authorization and master location information.")
 	fs.DurationVar(&o.NodeStatusUpdateFrequency.Duration, "node-status-update-frequency", o.NodeStatusUpdateFrequency.Duration, "Specifies how often the controller updates nodes' status.")
 
-	utilfeature.DefaultMutableFeatureGate.AddFlag(fss.FlagSet("generic"))
+	utilfeature.DefaultFeatureGate.AddFlag(fss.FlagSet("generic"))
 
 	return fss
 }
@@ -216,10 +217,10 @@ func (o *CloudControllerManagerOptions) ApplyTo(c *cloudcontrollerconfig.Config,
 }
 
 // Validate is used to validate config before launching the cloud controller manager
-func (o *CloudControllerManagerOptions) Validate(allControllers, disabledByDefaultControllers []string) error {
+func (o *CloudControllerManagerOptions) Validate() error {
 	errors := []error{}
 
-	errors = append(errors, o.Generic.Validate(allControllers, disabledByDefaultControllers)...)
+	errors = append(errors, o.Generic.Validate(nil, nil)...)
 	errors = append(errors, o.KubeCloudShared.Validate()...)
 	errors = append(errors, o.ServiceController.Validate()...)
 	errors = append(errors, o.SecureServing.Validate()...)
@@ -243,8 +244,8 @@ func resyncPeriod(c *cloudcontrollerconfig.Config) func() time.Duration {
 }
 
 // Config return a cloud controller manager config objective
-func (o *CloudControllerManagerOptions) Config(allControllers, disabledByDefaultControllers []string) (*cloudcontrollerconfig.Config, error) {
-	if err := o.Validate(allControllers, disabledByDefaultControllers); err != nil {
+func (o *CloudControllerManagerOptions) Config() (*cloudcontrollerconfig.Config, error) {
+	if err := o.Validate(); err != nil {
 		return nil, err
 	}
 
@@ -262,7 +263,7 @@ func (o *CloudControllerManagerOptions) Config(allControllers, disabledByDefault
 
 func createRecorder(kubeClient clientset.Interface, userAgent string) record.EventRecorder {
 	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartLogging(klog.Infof)
+	eventBroadcaster.StartLogging(glog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
 	// TODO: remove dependence on the legacyscheme
 	return eventBroadcaster.NewRecorder(legacyscheme.Scheme, v1.EventSource{Component: userAgent})

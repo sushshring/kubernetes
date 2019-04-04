@@ -35,22 +35,22 @@ func TestInsert(t *testing.T) {
 	// Insert normal
 	oldestTok, err := c.Insert(nextRequest())
 	require.NoError(t, err)
-	assert.Len(t, oldestTok, tokenLen)
+	assert.Len(t, oldestTok, TokenLen)
 	assertCacheSize(t, c, 1)
 
 	// Insert until full
-	for i := 0; i < maxInFlight-2; i++ {
+	for i := 0; i < MaxInFlight-2; i++ {
 		tok, err := c.Insert(nextRequest())
 		require.NoError(t, err)
-		assert.Len(t, tok, tokenLen)
+		assert.Len(t, tok, TokenLen)
 	}
-	assertCacheSize(t, c, maxInFlight-1)
+	assertCacheSize(t, c, MaxInFlight-1)
 
 	newestReq := nextRequest()
 	newestTok, err := c.Insert(newestReq)
 	require.NoError(t, err)
-	assert.Len(t, newestTok, tokenLen)
-	assertCacheSize(t, c, maxInFlight)
+	assert.Len(t, newestTok, TokenLen)
+	assertCacheSize(t, c, MaxInFlight)
 	require.Contains(t, c.tokens, oldestTok, "oldest request should still be cached")
 
 	// Consume newest token.
@@ -62,8 +62,8 @@ func TestInsert(t *testing.T) {
 	// Insert again (still full)
 	tok, err := c.Insert(nextRequest())
 	require.NoError(t, err)
-	assert.Len(t, tok, tokenLen)
-	assertCacheSize(t, c, maxInFlight)
+	assert.Len(t, tok, TokenLen)
+	assertCacheSize(t, c, MaxInFlight)
 
 	// Insert again (should evict)
 	_, err = c.Insert(nextRequest())
@@ -71,9 +71,9 @@ func TestInsert(t *testing.T) {
 	errResponse := httptest.NewRecorder()
 	require.NoError(t, WriteError(err, errResponse))
 	assert.Equal(t, errResponse.Code, http.StatusTooManyRequests)
-	assert.Equal(t, strconv.Itoa(int(cacheTTL.Seconds())), errResponse.HeaderMap.Get("Retry-After"))
+	assert.Equal(t, strconv.Itoa(int(CacheTTL.Seconds())), errResponse.HeaderMap.Get("Retry-After"))
 
-	assertCacheSize(t, c, maxInFlight)
+	assertCacheSize(t, c, MaxInFlight)
 	_, ok = c.Consume(oldestTok)
 	assert.True(t, ok, "oldest request should be valid")
 }
@@ -142,7 +142,7 @@ func TestConsume(t *testing.T) {
 		require.NoError(t, err)
 		assertCacheSize(t, c, 1)
 
-		clock.Step(2 * cacheTTL)
+		clock.Step(2 * CacheTTL)
 
 		_, ok := c.Consume(tok)
 		assert.False(t, ok)
@@ -167,7 +167,7 @@ func TestGC(t *testing.T) {
 
 	// expired: tok1, tok2
 	// non-expired: tok3, tok4
-	clock.Step(2 * cacheTTL)
+	clock.Step(2 * CacheTTL)
 	tok3, err := c.Insert(nextRequest())
 	require.NoError(t, err)
 	assertCacheSize(t, c, 1)
@@ -186,14 +186,14 @@ func TestGC(t *testing.T) {
 	assert.True(t, ok)
 
 	// When full, nothing is expired.
-	for i := 0; i < maxInFlight; i++ {
+	for i := 0; i < MaxInFlight; i++ {
 		_, err := c.Insert(nextRequest())
 		require.NoError(t, err)
 	}
-	assertCacheSize(t, c, maxInFlight)
+	assertCacheSize(t, c, MaxInFlight)
 
 	// When everything is expired
-	clock.Step(2 * cacheTTL)
+	clock.Step(2 * CacheTTL)
 	_, err = c.Insert(nextRequest())
 	require.NoError(t, err)
 	assertCacheSize(t, c, 1)

@@ -22,42 +22,40 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/pkg/errors"
-
 	"k8s.io/apimachinery/pkg/util/validation"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 )
 
-// GetControlPlaneEndpoint returns a properly formatted endpoint for the control plane built according following rules:
-// - If the controlPlaneEndpoint is defined, use it.
-// - if the controlPlaneEndpoint is defined but without a port number, use the controlPlaneEndpoint + localEndpoint.BindPort is used.
-// - Otherwise, in case the controlPlaneEndpoint is not defined, use the localEndpoint.AdvertiseAddress + the localEndpoint.BindPort.
-func GetControlPlaneEndpoint(controlPlaneEndpoint string, localEndpoint *kubeadmapi.APIEndpoint) (string, error) {
+// GetMasterEndpoint returns a properly formatted endpoint for the control plane built according following rules:
+// - If the ControlPlaneEndpoint is defined, use it.
+// - if the ControlPlaneEndpoint is defined but without a port number, use the ControlPlaneEndpoint + api.BindPort is used.
+// - Otherwise, in case the ControlPlaneEndpoint is not defined, use the api.AdvertiseAddress + the api.BindPort.
+func GetMasterEndpoint(cfg *kubeadmapi.InitConfiguration) (string, error) {
 	// parse the bind port
-	bindPortString := strconv.Itoa(int(localEndpoint.BindPort))
+	bindPortString := strconv.Itoa(int(cfg.APIEndpoint.BindPort))
 	if _, err := ParsePort(bindPortString); err != nil {
-		return "", errors.Wrapf(err, "invalid value %q given for api.bindPort", localEndpoint.BindPort)
+		return "", fmt.Errorf("invalid value %q given for api.bindPort: %s", cfg.APIEndpoint.BindPort, err)
 	}
 
 	// parse the AdvertiseAddress
-	var ip = net.ParseIP(localEndpoint.AdvertiseAddress)
+	var ip = net.ParseIP(cfg.APIEndpoint.AdvertiseAddress)
 	if ip == nil {
-		return "", errors.Errorf("invalid value `%s` given for api.advertiseAddress", localEndpoint.AdvertiseAddress)
+		return "", fmt.Errorf("invalid value `%s` given for api.advertiseAddress", cfg.APIEndpoint.AdvertiseAddress)
 	}
 
-	// set the control-plane url using localEndpoint.AdvertiseAddress + the localEndpoint.BindPort
-	controlPlaneURL := &url.URL{
+	// set the master url using cfg.API.AdvertiseAddress + the cfg.API.BindPort
+	masterURL := &url.URL{
 		Scheme: "https",
 		Host:   net.JoinHostPort(ip.String(), bindPortString),
 	}
 
 	// if the controlplane endpoint is defined
-	if len(controlPlaneEndpoint) > 0 {
+	if len(cfg.ControlPlaneEndpoint) > 0 {
 		// parse the controlplane endpoint
 		var host, port string
 		var err error
-		if host, port, err = ParseHostPort(controlPlaneEndpoint); err != nil {
-			return "", errors.Wrapf(err, "invalid value %q given for controlPlaneEndpoint", controlPlaneEndpoint)
+		if host, port, err = ParseHostPort(cfg.ControlPlaneEndpoint); err != nil {
+			return "", fmt.Errorf("invalid value %q given for controlPlaneEndpoint: %s", cfg.ControlPlaneEndpoint, err)
 		}
 
 		// if a port is provided within the controlPlaneAddress warn the users we are using it, else use the bindport
@@ -69,14 +67,14 @@ func GetControlPlaneEndpoint(controlPlaneEndpoint string, localEndpoint *kubeadm
 			port = bindPortString
 		}
 
-		// overrides the control-plane url using the controlPlaneAddress (and eventually the bindport)
-		controlPlaneURL = &url.URL{
+		// overrides the master url using the controlPlaneAddress (and eventually the bindport)
+		masterURL = &url.URL{
 			Scheme: "https",
 			Host:   net.JoinHostPort(host, port),
 		}
 	}
 
-	return controlPlaneURL.String(), nil
+	return masterURL.String(), nil
 }
 
 // ParseHostPort parses a network address of the form "host:port", "ipv4:port", "[ipv6]:port" into host and port;
@@ -95,7 +93,7 @@ func ParseHostPort(hostport string) (string, string, error) {
 	// if port is defined, parse and validate it
 	if port != "" {
 		if _, err := ParsePort(port); err != nil {
-			return "", "", errors.Errorf("hostport %s: port %s must be a valid number between 1 and 65535, inclusive", hostport, port)
+			return "", "", fmt.Errorf("port must be a valid number between 1 and 65535, inclusive")
 		}
 	}
 
@@ -109,7 +107,7 @@ func ParseHostPort(hostport string) (string, string, error) {
 		return host, port, nil
 	}
 
-	return "", "", errors.Errorf("hostport %s: host '%s' must be a valid IP address or a valid RFC-1123 DNS subdomain", hostport, host)
+	return "", "", fmt.Errorf("host must be a valid IP address or a valid RFC-1123 DNS subdomain")
 }
 
 // ParsePort parses a string representing a TCP port.
@@ -120,5 +118,5 @@ func ParsePort(port string) (int, error) {
 		return portInt, nil
 	}
 
-	return 0, errors.New("port must be a valid number between 1 and 65535, inclusive")
+	return 0, fmt.Errorf("port must be a valid number between 1 and 65535, inclusive")
 }

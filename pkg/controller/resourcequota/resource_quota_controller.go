@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 
 	"k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -30,11 +30,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/informers"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -50,6 +49,12 @@ type NamespacedResourcesFunc func() ([]*metav1.APIResourceList, error)
 // ReplenishmentFunc is a signal that a resource changed in specified namespace
 // that may require quota to be recalculated.
 type ReplenishmentFunc func(groupResource schema.GroupResource, namespace string)
+
+// InformerFactory is all the quota system needs to interface with informers.
+type InformerFactory interface {
+	ForResource(resource schema.GroupVersionResource) (informers.GenericInformer, error)
+	Start(stopCh <-chan struct{})
+}
 
 // ResourceQuotaControllerOptions holds options for creating a quota controller
 type ResourceQuotaControllerOptions struct {
@@ -68,7 +73,7 @@ type ResourceQuotaControllerOptions struct {
 	// InformersStarted knows if informers were started.
 	InformersStarted <-chan struct{}
 	// InformerFactory interfaces with informers.
-	InformerFactory controller.InformerFactory
+	InformerFactory InformerFactory
 	// Controls full resync of objects monitored for replenishment.
 	ReplenishmentResyncPeriod controller.ResyncPeriodFunc
 }
@@ -175,7 +180,7 @@ func NewResourceQuotaController(options *ResourceQuotaControllerOptions) (*Resou
 
 // enqueueAll is called at the fullResyncPeriod interval to force a full recalculation of quota usage statistics
 func (rq *ResourceQuotaController) enqueueAll() {
-	defer klog.V(4).Infof("Resource quota controller queued all resource quota for full calculation of usage")
+	defer glog.V(4).Infof("Resource quota controller queued all resource quota for full calculation of usage")
 	rqs, err := rq.rqLister.List(labels.Everything())
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("unable to enqueue all - error listing resource quotas: %v", err))
@@ -195,7 +200,7 @@ func (rq *ResourceQuotaController) enqueueAll() {
 func (rq *ResourceQuotaController) enqueueResourceQuota(obj interface{}) {
 	key, err := controller.KeyFunc(obj)
 	if err != nil {
-		klog.Errorf("Couldn't get key for object %+v: %v", obj, err)
+		glog.Errorf("Couldn't get key for object %+v: %v", obj, err)
 		return
 	}
 	rq.queue.Add(key)
@@ -204,7 +209,7 @@ func (rq *ResourceQuotaController) enqueueResourceQuota(obj interface{}) {
 func (rq *ResourceQuotaController) addQuota(obj interface{}) {
 	key, err := controller.KeyFunc(obj)
 	if err != nil {
-		klog.Errorf("Couldn't get key for object %+v: %v", obj, err)
+		glog.Errorf("Couldn't get key for object %+v: %v", obj, err)
 		return
 	}
 
@@ -256,7 +261,7 @@ func (rq *ResourceQuotaController) worker(queue workqueue.RateLimitingInterface)
 	return func() {
 		for {
 			if quit := workFunc(); quit {
-				klog.Infof("resource quota controller worker shutting down")
+				glog.Infof("resource quota controller worker shutting down")
 				return
 			}
 		}
@@ -268,8 +273,8 @@ func (rq *ResourceQuotaController) Run(workers int, stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	defer rq.queue.ShutDown()
 
-	klog.Infof("Starting resource quota controller")
-	defer klog.Infof("Shutting down resource quota controller")
+	glog.Infof("Starting resource quota controller")
+	defer glog.Infof("Shutting down resource quota controller")
 
 	if rq.quotaMonitor != nil {
 		go rq.quotaMonitor.Run(stopCh)
@@ -293,7 +298,7 @@ func (rq *ResourceQuotaController) Run(workers int, stopCh <-chan struct{}) {
 func (rq *ResourceQuotaController) syncResourceQuotaFromKey(key string) (err error) {
 	startTime := time.Now()
 	defer func() {
-		klog.V(4).Infof("Finished syncing resource quota %q (%v)", key, time.Since(startTime))
+		glog.V(4).Infof("Finished syncing resource quota %q (%v)", key, time.Since(startTime))
 	}()
 
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
@@ -302,11 +307,11 @@ func (rq *ResourceQuotaController) syncResourceQuotaFromKey(key string) (err err
 	}
 	quota, err := rq.rqLister.ResourceQuotas(namespace).Get(name)
 	if errors.IsNotFound(err) {
-		klog.Infof("Resource quota has been deleted %v", key)
+		glog.Infof("Resource quota has been deleted %v", key)
 		return nil
 	}
 	if err != nil {
-		klog.Infof("Unable to retrieve resource quota %v from store: %v", key, err)
+		glog.Infof("Unable to retrieve resource quota %v from store: %v", key, err)
 		return err
 	}
 	return rq.syncResourceQuota(quota)
@@ -315,12 +320,12 @@ func (rq *ResourceQuotaController) syncResourceQuotaFromKey(key string) (err err
 // syncResourceQuota runs a complete sync of resource quota status across all known kinds
 func (rq *ResourceQuotaController) syncResourceQuota(resourceQuota *v1.ResourceQuota) (err error) {
 	// quota is dirty if any part of spec hard limits differs from the status hard limits
-	statusLimitsDirty := !apiequality.Semantic.DeepEqual(resourceQuota.Spec.Hard, resourceQuota.Status.Hard)
+	dirty := !apiequality.Semantic.DeepEqual(resourceQuota.Spec.Hard, resourceQuota.Status.Hard)
 
 	// dirty tracks if the usage status differs from the previous sync,
 	// if so, we send a new usage with latest status
 	// if this is our first sync, it will be dirty by default, since we need track usage
-	dirty := statusLimitsDirty || resourceQuota.Status.Hard == nil || resourceQuota.Status.Used == nil
+	dirty = dirty || resourceQuota.Status.Hard == nil || resourceQuota.Status.Used == nil
 
 	used := v1.ResourceList{}
 	if resourceQuota.Status.Used != nil {
@@ -328,12 +333,9 @@ func (rq *ResourceQuotaController) syncResourceQuota(resourceQuota *v1.ResourceQ
 	}
 	hardLimits := quota.Add(v1.ResourceList{}, resourceQuota.Spec.Hard)
 
-	errors := []error{}
-
 	newUsage, err := quota.CalculateUsage(resourceQuota.Namespace, resourceQuota.Spec.Scopes, hardLimits, rq.registry, resourceQuota.Spec.ScopeSelector)
 	if err != nil {
-		// if err is non-nil, remember it to return, but continue updating status with any resources in newUsage
-		errors = append(errors, err)
+		return err
 	}
 	for key, value := range newUsage {
 		used[key] = value
@@ -345,22 +347,27 @@ func (rq *ResourceQuotaController) syncResourceQuota(resourceQuota *v1.ResourceQ
 
 	// Create a usage object that is based on the quota resource version that will handle updates
 	// by default, we preserve the past usage observation, and set hard to the current spec
-	usage := resourceQuota.DeepCopy()
-	usage.Status = v1.ResourceQuotaStatus{
-		Hard: hardLimits,
-		Used: used,
+	usage := v1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            resourceQuota.Name,
+			Namespace:       resourceQuota.Namespace,
+			ResourceVersion: resourceQuota.ResourceVersion,
+			Labels:          resourceQuota.Labels,
+			Annotations:     resourceQuota.Annotations},
+		Status: v1.ResourceQuotaStatus{
+			Hard: hardLimits,
+			Used: used,
+		},
 	}
 
 	dirty = dirty || !quota.Equals(usage.Status.Used, resourceQuota.Status.Used)
 
 	// there was a change observed by this controller that requires we update quota
 	if dirty {
-		_, err = rq.rqClient.ResourceQuotas(usage.Namespace).UpdateStatus(usage)
-		if err != nil {
-			errors = append(errors, err)
-		}
+		_, err = rq.rqClient.ResourceQuotas(usage.Namespace).UpdateStatus(&usage)
+		return err
 	}
-	return utilerrors.NewAggregate(errors)
+	return nil
 }
 
 // replenishQuota is a replenishment function invoked by a controller to notify that a quota should be recalculated
@@ -419,68 +426,28 @@ func (rq *ResourceQuotaController) Sync(discoveryFunc NamespacedResourcesFunc, p
 
 		// Decide whether discovery has reported a change.
 		if reflect.DeepEqual(oldResources, newResources) {
-			klog.V(4).Infof("no resource updates from discovery, skipping resource quota sync")
+			glog.V(4).Infof("no resource updates from discovery, skipping resource quota sync")
 			return
 		}
+
+		// Something has changed, so track the new state and perform a sync.
+		glog.V(2).Infof("syncing resource quota controller with updated resources from discovery: %v", newResources)
+		oldResources = newResources
 
 		// Ensure workers are paused to avoid processing events before informers
 		// have resynced.
 		rq.workerLock.Lock()
 		defer rq.workerLock.Unlock()
 
-		// Something has changed, so track the new state and perform a sync.
-		if klog.V(2) {
-			klog.Infof("syncing resource quota controller with updated resources from discovery: %s", printDiff(oldResources, newResources))
-		}
-
 		// Perform the monitor resync and wait for controllers to report cache sync.
 		if err := rq.resyncMonitors(newResources); err != nil {
 			utilruntime.HandleError(fmt.Errorf("failed to sync resource monitors: %v", err))
 			return
 		}
-		// wait for caches to fill for a while (our sync period).
-		// this protects us from deadlocks where available resources changed and one of our informer caches will never fill.
-		// informers keep attempting to sync in the background, so retrying doesn't interrupt them.
-		// the call to resyncMonitors on the reattempt will no-op for resources that still exist.
-		if rq.quotaMonitor != nil && !controller.WaitForCacheSync("resource quota", waitForStopOrTimeout(stopCh, period), rq.quotaMonitor.IsSynced) {
+		if rq.quotaMonitor != nil && !controller.WaitForCacheSync("resource quota", stopCh, rq.quotaMonitor.IsSynced) {
 			utilruntime.HandleError(fmt.Errorf("timed out waiting for quota monitor sync"))
-			return
 		}
-
-		// success, remember newly synced resources
-		oldResources = newResources
-		klog.V(2).Infof("synced quota controller")
 	}, period, stopCh)
-}
-
-// printDiff returns a human-readable summary of what resources were added and removed
-func printDiff(oldResources, newResources map[schema.GroupVersionResource]struct{}) string {
-	removed := sets.NewString()
-	for oldResource := range oldResources {
-		if _, ok := newResources[oldResource]; !ok {
-			removed.Insert(fmt.Sprintf("%+v", oldResource))
-		}
-	}
-	added := sets.NewString()
-	for newResource := range newResources {
-		if _, ok := oldResources[newResource]; !ok {
-			added.Insert(fmt.Sprintf("%+v", newResource))
-		}
-	}
-	return fmt.Sprintf("added: %v, removed: %v", added.List(), removed.List())
-}
-
-// waitForStopOrTimeout returns a stop channel that closes when the provided stop channel closes or when the specified timeout is reached
-func waitForStopOrTimeout(stopCh <-chan struct{}, timeout time.Duration) <-chan struct{} {
-	stopChWithTimeout := make(chan struct{})
-	go func() {
-		defer close(stopChWithTimeout)
-		select {
-		case <-stopCh:
-		case <-time.After(timeout):
-		}
-	}()
-	return stopChWithTimeout
 }
 
 // resyncMonitors starts or stops quota monitors as needed to ensure that all

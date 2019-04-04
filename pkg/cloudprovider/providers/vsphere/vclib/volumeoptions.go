@@ -19,7 +19,7 @@ package vclib
 import (
 	"strings"
 
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 // VolumeOptions specifies various options for a volume.
@@ -33,7 +33,6 @@ type VolumeOptions struct {
 	StoragePolicyName      string
 	StoragePolicyID        string
 	SCSIControllerType     string
-	Zone                   []string
 }
 
 var (
@@ -60,7 +59,7 @@ func DiskformatValidOptions() string {
 // CheckDiskFormatSupported checks if the diskFormat is valid
 func CheckDiskFormatSupported(diskFormat string) bool {
 	if DiskFormatValidType[diskFormat] == "" {
-		klog.Errorf("Not a valid Disk Format. Valid options are %+q", DiskformatValidOptions())
+		glog.Errorf("Not a valid Disk Format. Valid options are %+q", DiskformatValidOptions())
 		return false
 	}
 	return true
@@ -83,7 +82,7 @@ func CheckControllerSupported(ctrlType string) bool {
 			return true
 		}
 	}
-	klog.Errorf("Not a valid SCSI Controller Type. Valid options are %q", SCSIControllerTypeValidOptions())
+	glog.Errorf("Not a valid SCSI Controller Type. Valid options are %q", SCSIControllerTypeValidOptions())
 	return false
 }
 

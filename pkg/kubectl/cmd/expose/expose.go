@@ -20,8 +20,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	"k8s.io/klog"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,13 +30,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/printers"
-	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/cli-runtime/pkg/genericclioptions/printers"
+	"k8s.io/cli-runtime/pkg/genericclioptions/resource"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/kubernetes/pkg/kubectl"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/kubectl/generate"
-	generateversioned "k8s.io/kubernetes/pkg/kubectl/generate/versioned"
 	"k8s.io/kubernetes/pkg/kubectl/polymorphichelpers"
 	"k8s.io/kubernetes/pkg/kubectl/scheme"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
@@ -74,7 +72,7 @@ var (
 		kubectl expose service nginx --port=443 --target-port=8443 --name=nginx-https
 
 		# Create a service for a replicated streaming application on port 4100 balancing UDP traffic and named 'video-stream'.
-		kubectl expose rc streamer --port=4100 --protocol=UDP --name=video-stream
+		kubectl expose rc streamer --port=4100 --protocol=udp --name=video-stream
 
 		# Create a service for a replicated nginx using replica set, which serves on port 80 and connects to the containers on port 8000.
 		kubectl expose rs nginx --port=80 --target-port=8000
@@ -92,7 +90,7 @@ type ExposeServiceOptions struct {
 	DryRun           bool
 	EnforceNamespace bool
 
-	Generators                func(string) map[string]generate.Generator
+	Generators                func(string) map[string]kubectl.Generator
 	CanBeExposed              polymorphichelpers.CanBeExposedFunc
 	MapBasedSelectorForObject func(runtime.Object) (string, error)
 	PortsForObject            polymorphichelpers.PortsForObjectFunc
@@ -189,7 +187,7 @@ func (o *ExposeServiceOptions) Complete(f cmdutil.Factory, cmd *cobra.Command) e
 		return err
 	}
 
-	o.Generators = generateversioned.GeneratorFn
+	o.Generators = cmdutil.GeneratorFn
 	o.Builder = f.NewBuilder()
 	o.CanBeExposed = polymorphichelpers.CanBeExposedFn
 	o.MapBasedSelectorForObject = polymorphichelpers.MapBasedSelectorForObjectFn
@@ -242,7 +240,7 @@ func (o *ExposeServiceOptions) RunExpose(cmd *cobra.Command, args []string) erro
 			return err
 		}
 
-		params := generate.MakeParams(cmd, names)
+		params := kubectl.MakeParams(cmd, names)
 		name := info.Name
 		if len(name) > validation.DNS1035LabelMaxLength {
 			name = name[:validation.DNS1035LabelMaxLength]
@@ -251,7 +249,7 @@ func (o *ExposeServiceOptions) RunExpose(cmd *cobra.Command, args []string) erro
 
 		// For objects that need a pod selector, derive it from the exposed object in case a user
 		// didn't explicitly specify one via --selector
-		if s, found := params["selector"]; found && generate.IsZero(s) {
+		if s, found := params["selector"]; found && kubectl.IsZero(s) {
 			s, err := o.MapBasedSelectorForObject(info.Object)
 			if err != nil {
 				return cmdutil.UsageErrorf(cmd, "couldn't retrieve selectors via --selector flag or introspection: %v", err)
@@ -263,7 +261,7 @@ func (o *ExposeServiceOptions) RunExpose(cmd *cobra.Command, args []string) erro
 
 		// For objects that need a port, derive it from the exposed object in case a user
 		// didn't explicitly specify one via --port
-		if port, found := params["port"]; found && generate.IsZero(port) {
+		if port, found := params["port"]; found && kubectl.IsZero(port) {
 			ports, err := o.PortsForObject(info.Object)
 			if err != nil {
 				return cmdutil.UsageErrorf(cmd, "couldn't find port via --port flag or introspection: %v", err)
@@ -287,23 +285,23 @@ func (o *ExposeServiceOptions) RunExpose(cmd *cobra.Command, args []string) erro
 			if err != nil {
 				return cmdutil.UsageErrorf(cmd, "couldn't find protocol via introspection: %v", err)
 			}
-			if protocols := generate.MakeProtocols(protocolsMap); !generate.IsZero(protocols) {
+			if protocols := kubectl.MakeProtocols(protocolsMap); !kubectl.IsZero(protocols) {
 				params["protocols"] = protocols
 			}
 		}
 
-		if generate.IsZero(params["labels"]) {
+		if kubectl.IsZero(params["labels"]) {
 			labels, err := meta.NewAccessor().Labels(info.Object)
 			if err != nil {
 				return err
 			}
-			params["labels"] = generate.MakeLabels(labels)
+			params["labels"] = kubectl.MakeLabels(labels)
 		}
-		if err = generate.ValidateParams(names, params); err != nil {
+		if err = kubectl.ValidateParams(names, params); err != nil {
 			return err
 		}
 		// Check for invalid flags used against the present generator.
-		if err := generate.EnsureFlagsValid(cmd, generators, generatorName); err != nil {
+		if err := kubectl.EnsureFlagsValid(cmd, generators, generatorName); err != nil {
 			return err
 		}
 
@@ -314,15 +312,14 @@ func (o *ExposeServiceOptions) RunExpose(cmd *cobra.Command, args []string) erro
 		}
 
 		if inline := cmdutil.GetFlagString(cmd, "overrides"); len(inline) > 0 {
-			codec := runtime.NewCodec(scheme.DefaultJSONEncoder(), scheme.Codecs.UniversalDecoder(scheme.Scheme.PrioritizedVersionsAllGroups()...))
-			object, err = cmdutil.Merge(codec, object, inline)
+			object, err = cmdutil.Merge(scheme.Codecs.LegacyCodec(scheme.Scheme.PrioritizedVersionsAllGroups()...), object, inline)
 			if err != nil {
 				return err
 			}
 		}
 
 		if err := o.Recorder.Record(object); err != nil {
-			klog.V(4).Infof("error recording current command: %v", err)
+			glog.V(4).Infof("error recording current command: %v", err)
 		}
 
 		if o.DryRun {

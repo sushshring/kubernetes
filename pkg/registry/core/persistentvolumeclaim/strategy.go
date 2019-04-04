@@ -27,12 +27,10 @@ import (
 	"k8s.io/apiserver/pkg/registry/generic"
 	"k8s.io/apiserver/pkg/storage"
 	"k8s.io/apiserver/pkg/storage/names"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	pvcutil "k8s.io/kubernetes/pkg/api/persistentvolumeclaim"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/core/validation"
-	"k8s.io/kubernetes/pkg/features"
 )
 
 // persistentvolumeclaimStrategy implements behavior for PersistentVolumeClaim objects
@@ -54,7 +52,7 @@ func (persistentvolumeclaimStrategy) PrepareForCreate(ctx context.Context, obj r
 	pvc := obj.(*api.PersistentVolumeClaim)
 	pvc.Status = api.PersistentVolumeClaimStatus{}
 
-	pvcutil.DropDisabledFields(&pvc.Spec, nil)
+	pvcutil.DropDisabledAlphaFields(&pvc.Spec)
 }
 
 func (persistentvolumeclaimStrategy) Validate(ctx context.Context, obj runtime.Object) field.ErrorList {
@@ -76,7 +74,8 @@ func (persistentvolumeclaimStrategy) PrepareForUpdate(ctx context.Context, obj, 
 	oldPvc := old.(*api.PersistentVolumeClaim)
 	newPvc.Status = oldPvc.Status
 
-	pvcutil.DropDisabledFields(&newPvc.Spec, &oldPvc.Spec)
+	pvcutil.DropDisabledAlphaFields(&newPvc.Spec)
+	pvcutil.DropDisabledAlphaFields(&oldPvc.Spec)
 }
 
 func (persistentvolumeclaimStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
@@ -99,9 +98,6 @@ func (persistentvolumeclaimStatusStrategy) PrepareForUpdate(ctx context.Context,
 	newPv := obj.(*api.PersistentVolumeClaim)
 	oldPv := old.(*api.PersistentVolumeClaim)
 	newPv.Spec = oldPv.Spec
-	if !utilfeature.DefaultFeatureGate.Enabled(features.ExpandPersistentVolumes) && oldPv.Status.Conditions == nil {
-		newPv.Status.Conditions = nil
-	}
 }
 
 func (persistentvolumeclaimStatusStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
@@ -109,12 +105,12 @@ func (persistentvolumeclaimStatusStrategy) ValidateUpdate(ctx context.Context, o
 }
 
 // GetAttrs returns labels and fields of a given object for filtering purposes.
-func GetAttrs(obj runtime.Object) (labels.Set, fields.Set, error) {
+func GetAttrs(obj runtime.Object) (labels.Set, fields.Set, bool, error) {
 	persistentvolumeclaimObj, ok := obj.(*api.PersistentVolumeClaim)
 	if !ok {
-		return nil, nil, fmt.Errorf("not a persistentvolumeclaim")
+		return nil, nil, false, fmt.Errorf("not a persistentvolumeclaim")
 	}
-	return labels.Set(persistentvolumeclaimObj.Labels), PersistentVolumeClaimToSelectableFields(persistentvolumeclaimObj), nil
+	return labels.Set(persistentvolumeclaimObj.Labels), PersistentVolumeClaimToSelectableFields(persistentvolumeclaimObj), persistentvolumeclaimObj.Initializers != nil, nil
 }
 
 // MatchPersistentVolumeClaim returns a generic matcher for a given label and field selector.

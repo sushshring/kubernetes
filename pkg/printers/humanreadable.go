@@ -22,8 +22,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
-
-	"github.com/liggitt/tabwriter"
+	"text/tabwriter"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -509,17 +508,14 @@ func (h *HumanReadablePrinter) PrintTable(obj runtime.Object, options PrintOptio
 		return nil, results[1].Interface().(error)
 	}
 
-	var columns []metav1beta1.TableColumnDefinition
-	if !options.NoHeaders {
-		columns = handler.columnDefinitions
-		if !options.Wide {
-			columns = make([]metav1beta1.TableColumnDefinition, 0, len(handler.columnDefinitions))
-			for i := range handler.columnDefinitions {
-				if handler.columnDefinitions[i].Priority != 0 {
-					continue
-				}
-				columns = append(columns, handler.columnDefinitions[i])
+	columns := handler.columnDefinitions
+	if !options.Wide {
+		columns = make([]metav1beta1.TableColumnDefinition, 0, len(handler.columnDefinitions))
+		for i := range handler.columnDefinitions {
+			if handler.columnDefinitions[i].Priority != 0 {
+				continue
 			}
+			columns = append(columns, handler.columnDefinitions[i])
 		}
 	}
 	table := &metav1beta1.Table{

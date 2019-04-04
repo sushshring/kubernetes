@@ -4,7 +4,6 @@ go_library(
     name = "go_default_library",
     srcs = [
         "dep.go",
-        "modules.go",
         "remote.go",
         "repo.go",
     ],

@@ -29,8 +29,8 @@ import (
 	"strings"
 
 	"github.com/evanphx/json-patch"
+	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	"k8s.io/klog"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,8 +44,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/printers"
-	"k8s.io/cli-runtime/pkg/resource"
+	"k8s.io/cli-runtime/pkg/genericclioptions/printers"
+	"k8s.io/cli-runtime/pkg/genericclioptions/resource"
 	"k8s.io/kubernetes/pkg/kubectl"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/util/editor/crlf"
@@ -81,7 +81,6 @@ type EditOptions struct {
 	updatedResultGetter func(data []byte) *resource.Result
 }
 
-// NewEditOptions returns an initialized EditOptions instance
 func NewEditOptions(editMode EditMode, ioStreams genericclioptions.IOStreams) *EditOptions {
 	return &EditOptions{
 		RecordFlags: genericclioptions.NewRecordFlags(),
@@ -177,8 +176,10 @@ func (o *EditOptions) Complete(f cmdutil.Factory, args []string, cmd *cobra.Comm
 		// when do normal edit or apply edit we need to always retrieve the latest resource from server
 		b = b.ResourceTypeOrNameArgs(true, args...).Latest()
 	}
+	includeUninitialized := cmdutil.ShouldIncludeUninitialized(cmd, false)
 	r := b.NamespaceParam(cmdNamespace).DefaultNamespace().
 		FilenameParam(enforceNamespace, &o.FilenameOptions).
+		IncludeUninitialized(includeUninitialized).
 		ContinueOnError().
 		Flatten().
 		Do()
@@ -193,6 +194,7 @@ func (o *EditOptions) Complete(f cmdutil.Factory, args []string, cmd *cobra.Comm
 		return f.NewBuilder().
 			Unstructured().
 			Stream(bytes.NewReader(data), "edited-file").
+			IncludeUninitialized(includeUninitialized).
 			ContinueOnError().
 			Flatten().
 			Do()
@@ -214,7 +216,6 @@ func (o *EditOptions) Validate() error {
 	return nil
 }
 
-// Run performs the execution
 func (o *EditOptions) Run() error {
 	edit := NewDefaultEditor(editorEnvs())
 	// editFn is invoked for each edit session (once with a list for normal edit, once for each individual resource in a edit-on-create invocation)
@@ -286,7 +287,7 @@ func (o *EditOptions) Run() error {
 			if len(results.file) > 0 {
 				os.Remove(results.file)
 			}
-			klog.V(4).Infof("User edited:\n%s", string(edited))
+			glog.V(4).Infof("User edited:\n%s", string(edited))
 
 			// Apply validation
 			schema, err := o.f.Validator(o.EnableValidation)
@@ -398,7 +399,7 @@ func (o *EditOptions) Run() error {
 			return err
 		}
 		if len(infos) == 0 {
-			return errors.New("edit cancelled, no objects found")
+			return errors.New("edit cancelled, no objects found.")
 		}
 		return editFn(infos)
 	case ApplyEditMode:
@@ -458,12 +459,12 @@ func (o *EditOptions) visitToApplyEditPatch(originalInfos []*resource.Info, patc
 			return fmt.Errorf("no original object found for %#v", info.Object)
 		}
 
-		originalJS, err := encodeToJSON(originalInfo.Object.(runtime.Unstructured))
+		originalJS, err := encodeToJson(originalInfo.Object.(runtime.Unstructured))
 		if err != nil {
 			return err
 		}
 
-		editedJS, err := encodeToJSON(info.Object.(runtime.Unstructured))
+		editedJS, err := encodeToJson(info.Object.(runtime.Unstructured))
 		if err != nil {
 			return err
 		}
@@ -473,18 +474,21 @@ func (o *EditOptions) visitToApplyEditPatch(originalInfos []*resource.Info, patc
 			if err != nil {
 				return err
 			}
-			return printer.PrintObj(info.Object, o.Out)
-		}
-		err = o.annotationPatch(info)
-		if err != nil {
-			return err
-		}
+			printer.PrintObj(info.Object, o.Out)
+			return nil
+		} else {
+			err := o.annotationPatch(info)
+			if err != nil {
+				return err
+			}
 
-		printer, err := o.ToPrinter("edited")
-		if err != nil {
-			return err
+			printer, err := o.ToPrinter("edited")
+			if err != nil {
+				return err
+			}
+			printer.PrintObj(info.Object, o.Out)
+			return nil
 		}
-		return printer.PrintObj(info.Object, o.Out)
 	})
 	return err
 }
@@ -507,9 +511,8 @@ func (o *EditOptions) annotationPatch(update *resource.Info) error {
 	return nil
 }
 
-// GetApplyPatch is used to get and apply patches
 func GetApplyPatch(obj runtime.Unstructured) ([]byte, []byte, types.PatchType, error) {
-	beforeJSON, err := encodeToJSON(obj)
+	beforeJSON, err := encodeToJson(obj)
 	if err != nil {
 		return nil, []byte(""), types.MergePatchType, err
 	}
@@ -524,7 +527,7 @@ func GetApplyPatch(obj runtime.Unstructured) ([]byte, []byte, types.PatchType, e
 	}
 	annotations[corev1.LastAppliedConfigAnnotation] = string(beforeJSON)
 	accessor.SetAnnotations(objCopy, annotations)
-	afterJSON, err := encodeToJSON(objCopy.(runtime.Unstructured))
+	afterJSON, err := encodeToJson(objCopy.(runtime.Unstructured))
 	if err != nil {
 		return nil, beforeJSON, types.MergePatchType, err
 	}
@@ -532,7 +535,7 @@ func GetApplyPatch(obj runtime.Unstructured) ([]byte, []byte, types.PatchType, e
 	return patch, beforeJSON, types.MergePatchType, err
 }
 
-func encodeToJSON(obj runtime.Unstructured) ([]byte, error) {
+func encodeToJson(obj runtime.Unstructured) ([]byte, error) {
 	serialization, err := runtime.Encode(unstructured.UnstructuredJSONScheme, obj)
 	if err != nil {
 		return nil, err
@@ -566,12 +569,12 @@ func (o *EditOptions) visitToPatch(originalInfos []*resource.Info, patchVisitor 
 			return fmt.Errorf("no original object found for %#v", info.Object)
 		}
 
-		originalJS, err := encodeToJSON(originalInfo.Object.(runtime.Unstructured))
+		originalJS, err := encodeToJson(originalInfo.Object.(runtime.Unstructured))
 		if err != nil {
 			return err
 		}
 
-		editedJS, err := encodeToJSON(info.Object.(runtime.Unstructured))
+		editedJS, err := encodeToJson(info.Object.(runtime.Unstructured))
 		if err != nil {
 			return err
 		}
@@ -582,7 +585,8 @@ func (o *EditOptions) visitToPatch(originalInfos []*resource.Info, patchVisitor 
 			if err != nil {
 				return err
 			}
-			return printer.PrintObj(info.Object, o.Out)
+			printer.PrintObj(info.Object, o.Out)
+			return nil
 		}
 
 		preconditions := []mergepatch.PreconditionFunc{
@@ -602,12 +606,12 @@ func (o *EditOptions) visitToPatch(originalInfos []*resource.Info, patchVisitor 
 			patchType = types.MergePatchType
 			patch, err = jsonpatch.CreateMergePatch(originalJS, editedJS)
 			if err != nil {
-				klog.V(4).Infof("Unable to calculate diff, no merge is possible: %v", err)
+				glog.V(4).Infof("Unable to calculate diff, no merge is possible: %v", err)
 				return err
 			}
 			for _, precondition := range preconditions {
 				if !precondition(patch) {
-					klog.V(4).Infof("Unable to calculate diff, no merge is possible: %v", err)
+					glog.V(4).Infof("Unable to calculate diff, no merge is possible: %v", err)
 					return fmt.Errorf("%s", "At least one of apiVersion, kind and name was changed")
 				}
 			}
@@ -617,7 +621,7 @@ func (o *EditOptions) visitToPatch(originalInfos []*resource.Info, patchVisitor 
 			patchType = types.StrategicMergePatchType
 			patch, err = strategicpatch.CreateTwoWayMergePatch(originalJS, editedJS, versionedObject, preconditions...)
 			if err != nil {
-				klog.V(4).Infof("Unable to calculate diff, no merge is possible: %v", err)
+				glog.V(4).Infof("Unable to calculate diff, no merge is possible: %v", err)
 				if mergepatch.IsPreconditionFailed(err) {
 					return fmt.Errorf("%s", "At least one of apiVersion, kind and name was changed")
 				}
@@ -639,7 +643,8 @@ func (o *EditOptions) visitToPatch(originalInfos []*resource.Info, patchVisitor 
 		if err != nil {
 			return err
 		}
-		return printer.PrintObj(info.Object, o.Out)
+		printer.PrintObj(info.Object, o.Out)
+		return nil
 	})
 	return err
 }
@@ -653,7 +658,8 @@ func (o *EditOptions) visitToCreate(createVisitor resource.Visitor) error {
 		if err != nil {
 			return err
 		}
-		return printer.PrintObj(info.Object, o.Out)
+		printer.PrintObj(info.Object, o.Out)
+		return nil
 	})
 	return err
 }
@@ -668,7 +674,7 @@ func (o *EditOptions) visitAnnotation(annotationVisitor resource.Visitor) error 
 			}
 		}
 		if err := o.Recorder.Record(info.Object); err != nil {
-			klog.V(4).Infof("error recording current command: %v", err)
+			glog.V(4).Infof("error recording current command: %v", err)
 		}
 
 		return nil
@@ -677,18 +683,12 @@ func (o *EditOptions) visitAnnotation(annotationVisitor resource.Visitor) error 
 	return err
 }
 
-// EditMode can be either NormalEditMode, EditBeforeCreateMode or ApplyEditMode
 type EditMode string
 
 const (
-	// NormalEditMode is an edit mode
-	NormalEditMode EditMode = "normal_mode"
-
-	// EditBeforeCreateMode is an edit mode
+	NormalEditMode       EditMode = "normal_mode"
 	EditBeforeCreateMode EditMode = "edit_before_create_mode"
-
-	// ApplyEditMode is an edit mode
-	ApplyEditMode EditMode = "edit_last_applied_mode"
+	ApplyEditMode        EditMode = "edit_last_applied_mode"
 )
 
 // editReason preserves a message about the reason this file must be edited again

@@ -24,10 +24,11 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/golang/glog"
+
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/util"
@@ -154,11 +155,6 @@ type ActualStateOfWorld interface {
 	// mounted for the specified pod as requiring file system resize (if the plugin for the
 	// volume indicates it requires file system resize).
 	MarkFSResizeRequired(volumeName v1.UniqueVolumeName, podName volumetypes.UniquePodName)
-
-	// GetAttachedVolumes returns a list of volumes that is known to be attached
-	// to the node. This list can be used to determine volumes that are either in-use
-	// or have a mount/unmount operation pending.
-	GetAttachedVolumes() []AttachedVolume
 }
 
 // MountedVolume represents a volume that has successfully been mounted to a pod.
@@ -313,11 +309,6 @@ func (asw *actualStateOfWorld) MarkVolumeAsAttached(
 	return asw.addVolume(volumeName, volumeSpec, devicePath)
 }
 
-func (asw *actualStateOfWorld) MarkVolumeAsUncertain(
-	volumeName v1.UniqueVolumeName, volumeSpec *volume.Spec, _ types.NodeName) error {
-	return nil
-}
-
 func (asw *actualStateOfWorld) MarkVolumeAsDetached(
 	volumeName v1.UniqueVolumeName, nodeName types.NodeName) {
 	asw.DeleteVolume(volumeName)
@@ -416,7 +407,7 @@ func (asw *actualStateOfWorld) addVolume(
 	} else {
 		// If volume object already exists, update the fields such as device path
 		volumeObj.devicePath = devicePath
-		klog.V(2).Infof("Volume %q is already added to attachedVolume list, update device path %q",
+		glog.V(2).Infof("Volume %q is already added to attachedVolume list, update device path %q",
 			volumeName,
 			devicePath)
 	}
@@ -485,7 +476,7 @@ func (asw *actualStateOfWorld) MarkVolumeAsResized(
 			volumeName)
 	}
 
-	klog.V(5).Infof("Volume %s(OuterVolumeSpecName %s) of pod %s has been resized",
+	glog.V(5).Infof("Volume %s(OuterVolumeSpecName %s) of pod %s has been resized",
 		volumeName, podObj.outerVolumeSpecName, podName)
 	podObj.fsResizeRequired = false
 	asw.attachedVolumes[volumeName].mountedPods[podName] = podObj
@@ -506,7 +497,7 @@ func (asw *actualStateOfWorld) MarkRemountRequired(
 				asw.volumePluginMgr.FindPluginBySpec(podObj.volumeSpec)
 			if err != nil || volumePlugin == nil {
 				// Log and continue processing
-				klog.Errorf(
+				glog.Errorf(
 					"MarkRemountRequired failed to FindPluginBySpec for pod %q (podUid %q) volume: %q (volSpecName: %q)",
 					podObj.podName,
 					podObj.podUID,
@@ -530,22 +521,22 @@ func (asw *actualStateOfWorld) MarkFSResizeRequired(
 	defer asw.Unlock()
 	volumeObj, exist := asw.attachedVolumes[volumeName]
 	if !exist {
-		klog.Warningf("MarkFSResizeRequired for volume %s failed as volume not exist", volumeName)
+		glog.Warningf("MarkFSResizeRequired for volume %s failed as volume not exist", volumeName)
 		return
 	}
 
 	podObj, exist := volumeObj.mountedPods[podName]
 	if !exist {
-		klog.Warningf("MarkFSResizeRequired for volume %s failed "+
+		glog.Warningf("MarkFSResizeRequired for volume %s failed "+
 			"as pod(%s) not exist", volumeName, podName)
 		return
 	}
 
 	volumePlugin, err :=
-		asw.volumePluginMgr.FindNodeExpandablePluginBySpec(podObj.volumeSpec)
+		asw.volumePluginMgr.FindExpandablePluginBySpec(podObj.volumeSpec)
 	if err != nil || volumePlugin == nil {
 		// Log and continue processing
-		klog.Errorf(
+		glog.Errorf(
 			"MarkFSResizeRequired failed to find expandable plugin for pod %q volume: %q (volSpecName: %q)",
 			podObj.podName,
 			volumeObj.volumeName,
@@ -555,7 +546,7 @@ func (asw *actualStateOfWorld) MarkFSResizeRequired(
 
 	if volumePlugin.RequiresFSResize() {
 		if !podObj.fsResizeRequired {
-			klog.V(3).Infof("PVC volume %s(OuterVolumeSpecName %s) of pod %s requires file system resize",
+			glog.V(3).Infof("PVC volume %s(OuterVolumeSpecName %s) of pod %s requires file system resize",
 				volumeName, podObj.outerVolumeSpecName, podName)
 			podObj.fsResizeRequired = true
 		}
@@ -577,9 +568,7 @@ func (asw *actualStateOfWorld) SetVolumeGloballyMounted(
 
 	volumeObj.globallyMounted = globallyMounted
 	volumeObj.deviceMountPath = deviceMountPath
-	if devicePath != "" {
-		volumeObj.devicePath = devicePath
-	}
+	volumeObj.devicePath = devicePath
 	asw.attachedVolumes[volumeName] = volumeObj
 	return nil
 }
@@ -718,20 +707,6 @@ func (asw *actualStateOfWorld) GetGloballyMountedVolumes() []AttachedVolume {
 	}
 
 	return globallyMountedVolumes
-}
-
-func (asw *actualStateOfWorld) GetAttachedVolumes() []AttachedVolume {
-	asw.RLock()
-	defer asw.RUnlock()
-	allAttachedVolumes := make(
-		[]AttachedVolume, 0 /* len */, len(asw.attachedVolumes) /* cap */)
-	for _, volumeObj := range asw.attachedVolumes {
-		allAttachedVolumes = append(
-			allAttachedVolumes,
-			asw.newAttachedVolume(&volumeObj))
-	}
-
-	return allAttachedVolumes
 }
 
 func (asw *actualStateOfWorld) GetUnmountedVolumes() []AttachedVolume {

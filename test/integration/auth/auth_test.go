@@ -40,7 +40,6 @@ import (
 	"k8s.io/apiserver/pkg/authentication/group"
 	"k8s.io/apiserver/pkg/authentication/request/bearertoken"
 	"k8s.io/apiserver/pkg/authentication/serviceaccount"
-	"k8s.io/apiserver/pkg/authentication/token/cache"
 	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	"k8s.io/apiserver/pkg/authorization/authorizerfactory"
@@ -85,11 +84,11 @@ func getTestWebhookTokenAuth(serverURL string) (authenticator.Request, error) {
 	if err := json.NewEncoder(kubecfgFile).Encode(config); err != nil {
 		return nil, err
 	}
-	webhookTokenAuth, err := webhook.New(kubecfgFile.Name(), nil)
+	webhookTokenAuth, err := webhook.New(kubecfgFile.Name(), 2*time.Minute)
 	if err != nil {
 		return nil, err
 	}
-	return bearertoken.New(cache.New(webhookTokenAuth, false, 2*time.Minute, 2*time.Minute)), nil
+	return bearertoken.New(webhookTokenAuth), nil
 }
 
 func path(resource, namespace, name string) string {
@@ -228,7 +227,7 @@ var aBinding string = `
 }
 `
 
-var emptyEndpoints = `
+var emptyEndpoints string = `
 {
   "kind": "Endpoints",
   "apiVersion": "v1",
@@ -493,10 +492,10 @@ func parseResourceVersion(response []byte) (string, float64, error) {
 }
 
 func getPreviousResourceVersionKey(url, id string) string {
-	baseURL := strings.Split(url, "?")[0]
-	key := baseURL
+	baseUrl := strings.Split(url, "?")[0]
+	key := baseUrl
 	if id != "" {
-		key = fmt.Sprintf("%s/%v", baseURL, id)
+		key = fmt.Sprintf("%s/%v", baseUrl, id)
 	}
 	return key
 }
@@ -1075,8 +1074,8 @@ func TestKindAuthorization(t *testing.T) {
 			if r.verb == "PUT" && r.body != "" {
 				// For update operations, insert previous resource version
 				if resVersion := previousResourceVersion[getPreviousResourceVersionKey(r.URL, "")]; resVersion != 0 {
-					resourceVersionJSON := fmt.Sprintf(",\r\n\"resourceVersion\": \"%v\"", resVersion)
-					bodyStr = fmt.Sprintf(r.body, resourceVersionJSON)
+					resourceVersionJson := fmt.Sprintf(",\r\n\"resourceVersion\": \"%v\"", resVersion)
+					bodyStr = fmt.Sprintf(r.body, resourceVersionJson)
 				}
 			}
 		}

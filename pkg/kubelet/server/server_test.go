@@ -44,13 +44,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/apimachinery/pkg/util/httpstream/spdy"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apiserver/pkg/authentication/authenticator"
 	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	"k8s.io/client-go/tools/remotecommand"
 	utiltesting "k8s.io/client-go/util/testing"
-	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	api "k8s.io/kubernetes/pkg/apis/core"
+	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
 	statsapi "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
 
 	// Do some initialization to decode the query parameters correctly.
@@ -115,7 +114,7 @@ func (fk *fakeKubelet) GetCachedMachineInfo() (*cadvisorapi.MachineInfo, error) 
 	return fk.machineInfoFunc()
 }
 
-func (*fakeKubelet) GetVersionInfo() (*cadvisorapi.VersionInfo, error) {
+func (_ *fakeKubelet) GetVersionInfo() (*cadvisorapi.VersionInfo, error) {
 	return &cadvisorapi.VersionInfo{}, nil
 }
 
@@ -249,36 +248,29 @@ func (fk *fakeKubelet) GetPortForward(podName, podNamespace string, podUID types
 }
 
 // Unused functions
-func (*fakeKubelet) GetNode() (*v1.Node, error)                       { return nil, nil }
-func (*fakeKubelet) GetNodeConfig() cm.NodeConfig                     { return cm.NodeConfig{} }
-func (*fakeKubelet) GetPodCgroupRoot() string                         { return "" }
-func (*fakeKubelet) GetPodByCgroupfs(cgroupfs string) (*v1.Pod, bool) { return nil, false }
+func (_ *fakeKubelet) GetNode() (*v1.Node, error)                       { return nil, nil }
+func (_ *fakeKubelet) GetNodeConfig() cm.NodeConfig                     { return cm.NodeConfig{} }
+func (_ *fakeKubelet) GetPodCgroupRoot() string                         { return "" }
+func (_ *fakeKubelet) GetPodByCgroupfs(cgroupfs string) (*v1.Pod, bool) { return nil, false }
 func (fk *fakeKubelet) ListVolumesForPod(podUID types.UID) (map[string]volume.Volume, bool) {
 	return map[string]volume.Volume{}, true
 }
 
-func (*fakeKubelet) RootFsStats() (*statsapi.FsStats, error)    { return nil, nil }
-func (*fakeKubelet) ListPodStats() ([]statsapi.PodStats, error) { return nil, nil }
-func (*fakeKubelet) ListPodStatsAndUpdateCPUNanoCoreUsage() ([]statsapi.PodStats, error) {
-	return nil, nil
-}
-func (*fakeKubelet) ListPodCPUAndMemoryStats() ([]statsapi.PodStats, error) { return nil, nil }
-func (*fakeKubelet) ImageFsStats() (*statsapi.FsStats, error)               { return nil, nil }
-func (*fakeKubelet) RlimitStats() (*statsapi.RlimitStats, error)            { return nil, nil }
-func (*fakeKubelet) GetCgroupStats(cgroupName string, updateStats bool) (*statsapi.ContainerStats, *statsapi.NetworkStats, error) {
+func (_ *fakeKubelet) RootFsStats() (*statsapi.FsStats, error)     { return nil, nil }
+func (_ *fakeKubelet) ListPodStats() ([]statsapi.PodStats, error)  { return nil, nil }
+func (_ *fakeKubelet) ImageFsStats() (*statsapi.FsStats, error)    { return nil, nil }
+func (_ *fakeKubelet) RlimitStats() (*statsapi.RlimitStats, error) { return nil, nil }
+func (_ *fakeKubelet) GetCgroupStats(cgroupName string, updateStats bool) (*statsapi.ContainerStats, *statsapi.NetworkStats, error) {
 	return nil, nil, nil
-}
-func (*fakeKubelet) GetCgroupCPUAndMemoryStats(cgroupName string, updateStats bool) (*statsapi.ContainerStats, error) {
-	return nil, nil
 }
 
 type fakeAuth struct {
-	authenticateFunc func(*http.Request) (*authenticator.Response, bool, error)
+	authenticateFunc func(*http.Request) (user.Info, bool, error)
 	attributesFunc   func(user.Info, *http.Request) authorizer.Attributes
 	authorizeFunc    func(authorizer.Attributes) (authorized authorizer.Decision, reason string, err error)
 }
 
-func (f *fakeAuth) AuthenticateRequest(req *http.Request) (*authenticator.Response, bool, error) {
+func (f *fakeAuth) AuthenticateRequest(req *http.Request) (user.Info, bool, error) {
 	return f.authenticateFunc(req)
 }
 func (f *fakeAuth) GetRequestAttributes(u user.Info, req *http.Request) authorizer.Attributes {
@@ -321,8 +313,8 @@ func newServerTestWithDebug(enableDebugging, redirectContainerStreaming bool, st
 		streamingRuntime: streamingServer,
 	}
 	fw.fakeAuth = &fakeAuth{
-		authenticateFunc: func(req *http.Request) (*authenticator.Response, bool, error) {
-			return &authenticator.Response{User: &user.DefaultInfo{Name: "test"}}, true, nil
+		authenticateFunc: func(req *http.Request) (user.Info, bool, error) {
+			return &user.DefaultInfo{Name: "test"}, true, nil
 		},
 		attributesFunc: func(u user.Info, req *http.Request) authorizer.Attributes {
 			return &authorizer.AttributesRecord{User: u}
@@ -747,7 +739,7 @@ func TestAuthFilters(t *testing.T) {
 The kubelet API has likely registered a handler for a new path.
 If the new path has a use case for partitioned authorization when requested from the kubelet API,
 add a specific subresource for it in auth.go#GetRequestAttributes() and in TestAuthFilters().
-Otherwise, add it to the expected list of paths that map to the "proxy" subresource in TestAuthFilters()`, path))
+Otherwise, add it to the expected list of paths that map to the "proxy" subresource in TestAuthFilters().`, path))
 		}
 	}
 	attributesGetter := NewNodeAuthorizerAttributesGetter(types.NodeName("test"))
@@ -772,9 +764,9 @@ Otherwise, add it to the expected list of paths that map to the "proxy" subresou
 			calledAttributes   = false
 		)
 
-		fw.fakeAuth.authenticateFunc = func(req *http.Request) (*authenticator.Response, bool, error) {
+		fw.fakeAuth.authenticateFunc = func(req *http.Request) (user.Info, bool, error) {
 			calledAuthenticate = true
-			return &authenticator.Response{User: expectedUser}, true, nil
+			return expectedUser, true, nil
 		}
 		fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) authorizer.Attributes {
 			calledAttributes = true
@@ -834,9 +826,9 @@ func TestAuthenticationError(t *testing.T) {
 
 	fw := newServerTest()
 	defer fw.testHTTPServer.Close()
-	fw.fakeAuth.authenticateFunc = func(req *http.Request) (*authenticator.Response, bool, error) {
+	fw.fakeAuth.authenticateFunc = func(req *http.Request) (user.Info, bool, error) {
 		calledAuthenticate = true
-		return &authenticator.Response{User: expectedUser}, true, nil
+		return expectedUser, true, nil
 	}
 	fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) authorizer.Attributes {
 		calledAttributes = true
@@ -872,7 +864,7 @@ func TestAuthenticationFailure(t *testing.T) {
 
 	fw := newServerTest()
 	defer fw.testHTTPServer.Close()
-	fw.fakeAuth.authenticateFunc = func(req *http.Request) (*authenticator.Response, bool, error) {
+	fw.fakeAuth.authenticateFunc = func(req *http.Request) (user.Info, bool, error) {
 		calledAuthenticate = true
 		return nil, false, nil
 	}
@@ -910,9 +902,9 @@ func TestAuthorizationSuccess(t *testing.T) {
 
 	fw := newServerTest()
 	defer fw.testHTTPServer.Close()
-	fw.fakeAuth.authenticateFunc = func(req *http.Request) (*authenticator.Response, bool, error) {
+	fw.fakeAuth.authenticateFunc = func(req *http.Request) (user.Info, bool, error) {
 		calledAuthenticate = true
-		return &authenticator.Response{User: expectedUser}, true, nil
+		return expectedUser, true, nil
 	}
 	fw.fakeAuth.attributesFunc = func(u user.Info, req *http.Request) authorizer.Attributes {
 		calledAttributes = true
@@ -1556,8 +1548,9 @@ func TestServePortForward(t *testing.T) {
 			if test.redirect {
 				assert.Equal(t, http.StatusFound, resp.StatusCode, "status code")
 				return
+			} else {
+				assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode, "status code")
 			}
-			assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode, "status code")
 
 			conn, err := upgradeRoundTripper.NewConnection(resp)
 			require.NoError(t, err, "creating streaming connection")

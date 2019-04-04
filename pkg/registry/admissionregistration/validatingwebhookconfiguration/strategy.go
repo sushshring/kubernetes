@@ -63,7 +63,8 @@ func (validatingWebhookConfigurationStrategy) PrepareForUpdate(ctx context.Conte
 
 // Validate validates a new validatingWebhookConfiguration.
 func (validatingWebhookConfigurationStrategy) Validate(ctx context.Context, obj runtime.Object) field.ErrorList {
-	return validation.ValidateValidatingWebhookConfiguration(obj.(*admissionregistration.ValidatingWebhookConfiguration))
+	ic := obj.(*admissionregistration.ValidatingWebhookConfiguration)
+	return validation.ValidateValidatingWebhookConfiguration(ic)
 }
 
 // Canonicalize normalizes the object after validation.
@@ -77,7 +78,9 @@ func (validatingWebhookConfigurationStrategy) AllowCreateOnUpdate() bool {
 
 // ValidateUpdate is the default update validation for an end user.
 func (validatingWebhookConfigurationStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
-	return validation.ValidateValidatingWebhookConfigurationUpdate(obj.(*admissionregistration.ValidatingWebhookConfiguration), old.(*admissionregistration.ValidatingWebhookConfiguration))
+	validationErrorList := validation.ValidateValidatingWebhookConfiguration(obj.(*admissionregistration.ValidatingWebhookConfiguration))
+	updateErrorList := validation.ValidateValidatingWebhookConfigurationUpdate(obj.(*admissionregistration.ValidatingWebhookConfiguration), old.(*admissionregistration.ValidatingWebhookConfiguration))
+	return append(validationErrorList, updateErrorList...)
 }
 
 // AllowUnconditionalUpdate is the default update policy for validatingWebhookConfiguration objects. Status update should

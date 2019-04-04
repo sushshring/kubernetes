@@ -27,16 +27,15 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 
-	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,11 +44,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/cli-runtime/pkg/printers"
+	"k8s.io/cli-runtime/pkg/genericclioptions/printers"
 	"k8s.io/client-go/rest/fake"
 	cmdtesting "k8s.io/kubernetes/pkg/kubectl/cmd/testing"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/kubectl/drain"
 	"k8s.io/kubernetes/pkg/kubectl/scheme"
 )
 
@@ -59,7 +57,7 @@ const (
 )
 
 var node *corev1.Node
-var cordonedNode *corev1.Node
+var cordoned_node *corev1.Node
 
 func boolptr(b bool) *bool { return &b }
 
@@ -74,8 +72,8 @@ func TestMain(m *testing.M) {
 	}
 
 	// A copy of the same node, but cordoned.
-	cordonedNode = node.DeepCopy()
-	cordonedNode.Spec.Unschedulable = true
+	cordoned_node = node.DeepCopy()
+	cordoned_node.Spec.Unschedulable = true
 	os.Exit(m.Run())
 }
 
@@ -90,7 +88,7 @@ func TestCordon(t *testing.T) {
 	}{
 		{
 			description: "node/node syntax",
-			node:        cordonedNode,
+			node:        cordoned_node,
 			expected:    node,
 			cmd:         NewCmdUncordon,
 			arg:         "node/node",
@@ -98,7 +96,7 @@ func TestCordon(t *testing.T) {
 		},
 		{
 			description: "uncordon for real",
-			node:        cordonedNode,
+			node:        cordoned_node,
 			expected:    node,
 			cmd:         NewCmdUncordon,
 			arg:         "node",
@@ -114,8 +112,8 @@ func TestCordon(t *testing.T) {
 		},
 		{
 			description: "cordon does nothing",
-			node:        cordonedNode,
-			expected:    cordonedNode,
+			node:        cordoned_node,
+			expected:    cordoned_node,
 			cmd:         NewCmdCordon,
 			arg:         "node",
 			expectFatal: false,
@@ -123,7 +121,7 @@ func TestCordon(t *testing.T) {
 		{
 			description: "cordon for real",
 			node:        node,
-			expected:    cordonedNode,
+			expected:    cordoned_node,
 			cmd:         NewCmdCordon,
 			arg:         "node",
 			expectFatal: false,
@@ -144,22 +142,6 @@ func TestCordon(t *testing.T) {
 			arg:         "bar",
 			expectFatal: true,
 		},
-		{
-			description: "cordon for multiple nodes",
-			node:        node,
-			expected:    cordonedNode,
-			cmd:         NewCmdCordon,
-			arg:         "node node1 node2",
-			expectFatal: false,
-		},
-		{
-			description: "uncordon for multiple nodes",
-			node:        cordonedNode,
-			expected:    node,
-			cmd:         NewCmdUncordon,
-			arg:         "node node1 node2",
-			expectFatal: false,
-		},
 	}
 
 	for _, test := range tests {
@@ -170,7 +152,7 @@ func TestCordon(t *testing.T) {
 			codec := scheme.Codecs.LegacyCodec(scheme.Scheme.PrioritizedVersionsAllGroups()...)
 			ns := scheme.Codecs
 
-			newNode := &corev1.Node{}
+			new_node := &corev1.Node{}
 			updated := false
 			tf.Client = &fake.RESTClient{
 				GroupVersion:         schema.GroupVersion{Group: "", Version: "v1"},
@@ -178,18 +160,10 @@ func TestCordon(t *testing.T) {
 				Client: fake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
 					m := &MyReq{req}
 					switch {
-					case m.isFor("GET", "/nodes/node1"):
-						fallthrough
-					case m.isFor("GET", "/nodes/node2"):
-						fallthrough
 					case m.isFor("GET", "/nodes/node"):
 						return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, test.node)}, nil
 					case m.isFor("GET", "/nodes/bar"):
 						return &http.Response{StatusCode: 404, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.StringBody("nope")}, nil
-					case m.isFor("PATCH", "/nodes/node1"):
-						fallthrough
-					case m.isFor("PATCH", "/nodes/node2"):
-						fallthrough
 					case m.isFor("PATCH", "/nodes/node"):
 						data, err := ioutil.ReadAll(req.Body)
 						if err != nil {
@@ -204,14 +178,14 @@ func TestCordon(t *testing.T) {
 						if err != nil {
 							t.Fatalf("%s: unexpected error: %v", test.description, err)
 						}
-						if err := runtime.DecodeInto(codec, appliedPatch, newNode); err != nil {
+						if err := runtime.DecodeInto(codec, appliedPatch, new_node); err != nil {
 							t.Fatalf("%s: unexpected error: %v", test.description, err)
 						}
-						if !reflect.DeepEqual(test.expected.Spec, newNode.Spec) {
-							t.Fatalf("%s: expected:\n%v\nsaw:\n%v\n", test.description, test.expected.Spec.Unschedulable, newNode.Spec.Unschedulable)
+						if !reflect.DeepEqual(test.expected.Spec, new_node.Spec) {
+							t.Fatalf("%s: expected:\n%v\nsaw:\n%v\n", test.description, test.expected.Spec.Unschedulable, new_node.Spec.Unschedulable)
 						}
 						updated = true
-						return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, newNode)}, nil
+						return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, new_node)}, nil
 					default:
 						t.Fatalf("%s: unexpected request: %v %#v\n%#v", test.description, req.Method, req.URL, req)
 						return nil, nil
@@ -223,7 +197,7 @@ func TestCordon(t *testing.T) {
 			ioStreams, _, _, _ := genericclioptions.NewTestIOStreams()
 			cmd := test.cmd(tf, ioStreams)
 
-			sawFatal := false
+			saw_fatal := false
 			func() {
 				defer func() {
 					// Recover from the panic below.
@@ -232,15 +206,15 @@ func TestCordon(t *testing.T) {
 					cmdutil.DefaultBehaviorOnFatal()
 				}()
 				cmdutil.BehaviorOnFatal(func(e string, code int) {
-					sawFatal = true
+					saw_fatal = true
 					panic(e)
 				})
-				cmd.SetArgs(strings.Split(test.arg, " "))
+				cmd.SetArgs([]string{test.arg})
 				cmd.Execute()
 			}()
 
 			if test.expectFatal {
-				if !sawFatal {
+				if !saw_fatal {
 					t.Fatalf("%s: unexpected non-error", test.description)
 				}
 				if updated {
@@ -248,7 +222,7 @@ func TestCordon(t *testing.T) {
 				}
 			}
 
-			if !test.expectFatal && sawFatal {
+			if !test.expectFatal && saw_fatal {
 				t.Fatalf("%s: unexpected error", test.description)
 			}
 			if !reflect.DeepEqual(test.expected.Spec, test.node.Spec) && !updated {
@@ -274,7 +248,7 @@ func TestDrain(t *testing.T) {
 		},
 	}
 
-	rcPod := corev1.Pod{
+	rc_pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -296,18 +270,18 @@ func TestDrain(t *testing.T) {
 		},
 	}
 
-	ds := appsv1.DaemonSet{
+	ds := extensionsv1beta1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "ds",
 			Namespace:         "default",
 			CreationTimestamp: metav1.Time{Time: time.Now()},
 		},
-		Spec: appsv1.DaemonSetSpec{
+		Spec: extensionsv1beta1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 		},
 	}
 
-	dsPod := corev1.Pod{
+	ds_pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -315,7 +289,7 @@ func TestDrain(t *testing.T) {
 			Labels:            labels,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion:         "apps/v1",
+					APIVersion:         "extensions/v1beta1",
 					Kind:               "DaemonSet",
 					Name:               "ds",
 					BlockOwnerDeletion: boolptr(true),
@@ -328,7 +302,7 @@ func TestDrain(t *testing.T) {
 		},
 	}
 
-	dsTerminatedPod := corev1.Pod{
+	ds_terminated_pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -336,7 +310,7 @@ func TestDrain(t *testing.T) {
 			Labels:            labels,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion:         "apps/v1",
+					APIVersion:         "extensions/v1beta1",
 					Kind:               "DaemonSet",
 					Name:               "ds",
 					BlockOwnerDeletion: boolptr(true),
@@ -352,7 +326,7 @@ func TestDrain(t *testing.T) {
 		},
 	}
 
-	dsPodWithEmptyDir := corev1.Pod{
+	ds_pod_with_emptyDir := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -360,7 +334,7 @@ func TestDrain(t *testing.T) {
 			Labels:            labels,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion:         "apps/v1",
+					APIVersion:         "extensions/v1beta1",
 					Kind:               "DaemonSet",
 					Name:               "ds",
 					BlockOwnerDeletion: boolptr(true),
@@ -379,7 +353,7 @@ func TestDrain(t *testing.T) {
 		},
 	}
 
-	orphanedDsPod := corev1.Pod{
+	orphaned_ds_pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -402,7 +376,7 @@ func TestDrain(t *testing.T) {
 		},
 	}
 
-	jobPod := corev1.Pod{
+	job_pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -429,7 +403,7 @@ func TestDrain(t *testing.T) {
 		},
 	}
 
-	terminatedJobPodWithLocalStorage := corev1.Pod{
+	terminated_job_pod_with_local_storage := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -459,19 +433,19 @@ func TestDrain(t *testing.T) {
 		},
 	}
 
-	rs := appsv1.ReplicaSet{
+	rs := extensionsv1beta1.ReplicaSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "rs",
 			Namespace:         "default",
 			CreationTimestamp: metav1.Time{Time: time.Now()},
 			Labels:            labels,
 		},
-		Spec: appsv1.ReplicaSetSpec{
+		Spec: extensionsv1beta1.ReplicaSetSpec{
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 		},
 	}
 
-	rsPod := corev1.Pod{
+	rs_pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -492,7 +466,7 @@ func TestDrain(t *testing.T) {
 		},
 	}
 
-	nakedPod := corev1.Pod{
+	naked_pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -504,7 +478,7 @@ func TestDrain(t *testing.T) {
 		},
 	}
 
-	emptydirPod := corev1.Pod{
+	emptydir_pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -521,7 +495,7 @@ func TestDrain(t *testing.T) {
 			},
 		},
 	}
-	emptydirTerminatedPod := corev1.Pod{
+	emptydir_terminated_pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "bar",
 			Namespace:         "default",
@@ -548,7 +522,7 @@ func TestDrain(t *testing.T) {
 		expected      *corev1.Node
 		pods          []corev1.Pod
 		rcs           []corev1.ReplicationController
-		replicaSets   []appsv1.ReplicaSet
+		replicaSets   []extensionsv1beta1.ReplicaSet
 		args          []string
 		expectWarning string
 		expectFatal   bool
@@ -557,8 +531,8 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "RC-managed pod",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{rcPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{rc_pod},
 			rcs:          []corev1.ReplicationController{rc},
 			args:         []string{"node"},
 			expectFatal:  false,
@@ -567,8 +541,8 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "DS-managed pod",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{dsPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{ds_pod},
 			rcs:          []corev1.ReplicationController{rc},
 			args:         []string{"node"},
 			expectFatal:  true,
@@ -577,8 +551,8 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "DS-managed terminated pod",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{dsTerminatedPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{ds_terminated_pod},
 			rcs:          []corev1.ReplicationController{rc},
 			args:         []string{"node"},
 			expectFatal:  false,
@@ -587,29 +561,28 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "orphaned DS-managed pod",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{orphanedDsPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{orphaned_ds_pod},
 			rcs:          []corev1.ReplicationController{},
 			args:         []string{"node"},
 			expectFatal:  true,
 			expectDelete: false,
 		},
 		{
-			description:   "orphaned DS-managed pod with --force",
-			node:          node,
-			expected:      cordonedNode,
-			pods:          []corev1.Pod{orphanedDsPod},
-			rcs:           []corev1.ReplicationController{},
-			args:          []string{"node", "--force"},
-			expectFatal:   false,
-			expectDelete:  true,
-			expectWarning: "WARNING: deleting Pods not managed by ReplicationController, ReplicaSet, Job, DaemonSet or StatefulSet: default/bar",
+			description:  "orphaned DS-managed pod with --force",
+			node:         node,
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{orphaned_ds_pod},
+			rcs:          []corev1.ReplicationController{},
+			args:         []string{"node", "--force"},
+			expectFatal:  false,
+			expectDelete: true,
 		},
 		{
 			description:  "DS-managed pod with --ignore-daemonsets",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{dsPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{ds_pod},
 			rcs:          []corev1.ReplicationController{rc},
 			args:         []string{"node", "--ignore-daemonsets"},
 			expectFatal:  false,
@@ -618,19 +591,19 @@ func TestDrain(t *testing.T) {
 		{
 			description:   "DS-managed pod with emptyDir with --ignore-daemonsets",
 			node:          node,
-			expected:      cordonedNode,
-			pods:          []corev1.Pod{dsPodWithEmptyDir},
+			expected:      cordoned_node,
+			pods:          []corev1.Pod{ds_pod_with_emptyDir},
 			rcs:           []corev1.ReplicationController{rc},
 			args:          []string{"node", "--ignore-daemonsets"},
-			expectWarning: "WARNING: ignoring DaemonSet-managed Pods: default/bar",
+			expectWarning: "WARNING: Ignoring DaemonSet-managed pods: bar\n",
 			expectFatal:   false,
 			expectDelete:  false,
 		},
 		{
 			description:  "Job-managed pod with local storage",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{jobPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{job_pod},
 			rcs:          []corev1.ReplicationController{rc},
 			args:         []string{"node", "--force", "--delete-local-data=true"},
 			expectFatal:  false,
@@ -639,8 +612,8 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "Job-managed terminated pod",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{terminatedJobPodWithLocalStorage},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{terminated_job_pod_with_local_storage},
 			rcs:          []corev1.ReplicationController{rc},
 			args:         []string{"node"},
 			expectFatal:  false,
@@ -649,9 +622,9 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "RS-managed pod",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{rsPod},
-			replicaSets:  []appsv1.ReplicaSet{rs},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{rs_pod},
+			replicaSets:  []extensionsv1beta1.ReplicaSet{rs},
 			args:         []string{"node"},
 			expectFatal:  false,
 			expectDelete: true,
@@ -659,8 +632,8 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "naked pod",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{nakedPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{naked_pod},
 			rcs:          []corev1.ReplicationController{},
 			args:         []string{"node"},
 			expectFatal:  true,
@@ -669,8 +642,8 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "naked pod with --force",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{nakedPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{naked_pod},
 			rcs:          []corev1.ReplicationController{},
 			args:         []string{"node", "--force"},
 			expectFatal:  false,
@@ -679,8 +652,8 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "pod with EmptyDir",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{emptydirPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{emptydir_pod},
 			args:         []string{"node", "--force"},
 			expectFatal:  true,
 			expectDelete: false,
@@ -688,8 +661,8 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "terminated pod with emptyDir",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{emptydirTerminatedPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{emptydir_terminated_pod},
 			rcs:          []corev1.ReplicationController{rc},
 			args:         []string{"node"},
 			expectFatal:  false,
@@ -698,8 +671,8 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "pod with EmptyDir and --delete-local-data",
 			node:         node,
-			expected:     cordonedNode,
-			pods:         []corev1.Pod{emptydirPod},
+			expected:     cordoned_node,
+			pods:         []corev1.Pod{emptydir_pod},
 			args:         []string{"node", "--force", "--delete-local-data=true"},
 			expectFatal:  false,
 			expectDelete: true,
@@ -707,7 +680,7 @@ func TestDrain(t *testing.T) {
 		{
 			description:  "empty node",
 			node:         node,
-			expected:     cordonedNode,
+			expected:     cordoned_node,
 			pods:         []corev1.Pod{},
 			rcs:          []corev1.ReplicationController{rc},
 			args:         []string{"node"},
@@ -727,8 +700,9 @@ func TestDrain(t *testing.T) {
 		}
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				newNode := &corev1.Node{}
-				var deletions, evictions int32
+				new_node := &corev1.Node{}
+				deleted := false
+				evicted := false
 				tf := cmdtesting.NewTestFactory()
 				defer tf.Cleanup()
 
@@ -765,8 +739,8 @@ func TestDrain(t *testing.T) {
 							if testEviction {
 								resourceList.APIResources = []metav1.APIResource{
 									{
-										Name: drain.EvictionSubresource,
-										Kind: drain.EvictionKind,
+										Name: EvictionSubresource,
+										Kind: EvictionKind,
 									},
 								}
 							}
@@ -778,7 +752,7 @@ func TestDrain(t *testing.T) {
 						case m.isFor("GET", "/namespaces/default/daemonsets/ds"):
 							return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, &ds)}, nil
 						case m.isFor("GET", "/namespaces/default/daemonsets/missing-ds"):
-							return &http.Response{StatusCode: 404, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, &appsv1.DaemonSet{})}, nil
+							return &http.Response{StatusCode: 404, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, &extensionsv1beta1.DaemonSet{})}, nil
 						case m.isFor("GET", "/namespaces/default/jobs/job"):
 							return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, &job)}, nil
 						case m.isFor("GET", "/namespaces/default/replicasets/rs"):
@@ -790,10 +764,10 @@ func TestDrain(t *testing.T) {
 							if err != nil {
 								t.Fatalf("%s: unexpected error: %v", test.description, err)
 							}
-							getParams := make(url.Values)
-							getParams["fieldSelector"] = []string{"spec.nodeName=node"}
-							if !reflect.DeepEqual(getParams, values) {
-								t.Fatalf("%s: expected:\n%v\nsaw:\n%v\n", test.description, getParams, values)
+							get_params := make(url.Values)
+							get_params["fieldSelector"] = []string{"spec.nodeName=node"}
+							if !reflect.DeepEqual(get_params, values) {
+								t.Fatalf("%s: expected:\n%v\nsaw:\n%v\n", test.description, get_params, values)
 							}
 							return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, &corev1.PodList{Items: test.pods})}, nil
 						case m.isFor("GET", "/replicationcontrollers"):
@@ -812,19 +786,18 @@ func TestDrain(t *testing.T) {
 							if err != nil {
 								t.Fatalf("%s: unexpected error: %v", test.description, err)
 							}
-							if err := runtime.DecodeInto(codec, appliedPatch, newNode); err != nil {
+							if err := runtime.DecodeInto(codec, appliedPatch, new_node); err != nil {
 								t.Fatalf("%s: unexpected error: %v", test.description, err)
 							}
-							if !reflect.DeepEqual(test.expected.Spec, newNode.Spec) {
-								t.Fatalf("%s: expected:\n%v\nsaw:\n%v\n", test.description, test.expected.Spec, newNode.Spec)
+							if !reflect.DeepEqual(test.expected.Spec, new_node.Spec) {
+								t.Fatalf("%s: expected:\n%v\nsaw:\n%v\n", test.description, test.expected.Spec, new_node.Spec)
 							}
-							return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, newNode)}, nil
+							return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, new_node)}, nil
 						case m.isFor("DELETE", "/namespaces/default/pods/bar"):
-							atomic.AddInt32(&deletions, 1)
+							deleted = true
 							return &http.Response{StatusCode: 204, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, &test.pods[0])}, nil
 						case m.isFor("POST", "/namespaces/default/pods/bar/eviction"):
-
-							atomic.AddInt32(&evictions, 1)
+							evicted = true
 							return &http.Response{StatusCode: 201, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, &policyv1beta1.Eviction{})}, nil
 						default:
 							t.Fatalf("%s: unexpected request: %v %#v\n%#v", test.description, req.Method, req.URL, req)
@@ -837,8 +810,8 @@ func TestDrain(t *testing.T) {
 				ioStreams, _, _, errBuf := genericclioptions.NewTestIOStreams()
 				cmd := NewCmdDrain(tf, ioStreams)
 
-				sawFatal := false
-				fatalMsg := ""
+				saw_fatal := false
+				fatal_msg := ""
 				func() {
 					defer func() {
 						// Recover from the panic below.
@@ -846,25 +819,20 @@ func TestDrain(t *testing.T) {
 						// Restore cmdutil behavior
 						cmdutil.DefaultBehaviorOnFatal()
 					}()
-					cmdutil.BehaviorOnFatal(func(e string, code int) { sawFatal = true; fatalMsg = e; panic(e) })
+					cmdutil.BehaviorOnFatal(func(e string, code int) { saw_fatal = true; fatal_msg = e; panic(e) })
 					cmd.SetArgs(test.args)
 					cmd.Execute()
 				}()
 				if test.expectFatal {
-					if !sawFatal {
-						//t.Logf("outBuf = %s", outBuf.String())
-						//t.Logf("errBuf = %s", errBuf.String())
+					if !saw_fatal {
 						t.Fatalf("%s: unexpected non-error when using %s", test.description, currMethod)
 					}
 				} else {
-					if sawFatal {
-						t.Fatalf("%s: unexpected error when using %s: %s", test.description, currMethod, fatalMsg)
+					if saw_fatal {
+						t.Fatalf("%s: unexpected error when using %s: %s", test.description, currMethod, fatal_msg)
 
 					}
 				}
-
-				deleted := deletions > 0
-				evicted := evictions > 0
 
 				if test.expectDelete {
 					// Test Delete
@@ -872,25 +840,14 @@ func TestDrain(t *testing.T) {
 						t.Fatalf("%s: pod never deleted", test.description)
 					}
 					// Test Eviction
-					if testEviction {
-						if !evicted {
-							t.Fatalf("%s: pod never evicted", test.description)
-						}
-						if evictions > 1 {
-							t.Fatalf("%s: asked to evict same pod %d too many times", test.description, evictions-1)
-						}
+					if testEviction && !evicted {
+						t.Fatalf("%s: pod never evicted", test.description)
 					}
 				}
 				if !test.expectDelete {
 					if deleted {
 						t.Fatalf("%s: unexpected delete when using %s", test.description, currMethod)
 					}
-					if deletions > 1 {
-						t.Fatalf("%s: asked to deleted same pod %d too many times", test.description, deletions-1)
-					}
-				}
-				if deleted && evicted {
-					t.Fatalf("%s: same pod deleted %d times and evicted %d times", test.description, deletions, evictions)
 				}
 
 				if len(test.expectWarning) > 0 {
@@ -898,9 +855,8 @@ func TestDrain(t *testing.T) {
 						t.Fatalf("%s: expected warning, but found no stderr output", test.description)
 					}
 
-					// Mac and Bazel on Linux behave differently when returning newlines
-					if a, e := errBuf.String(), test.expectWarning; !strings.Contains(a, e) {
-						t.Fatalf("%s: actual warning message did not match expected warning message.\n Expecting:\n%v\n  Got:\n%v", test.description, e, a)
+					if errBuf.String() != test.expectWarning {
+						t.Fatalf("%s: actual warning message did not match expected warning message.\n Expecting: %s\n  Got: %s", test.description, test.expectWarning, errBuf.String())
 					}
 				}
 			})
@@ -977,7 +933,7 @@ func TestDeletePods(t *testing.T) {
 			tf := cmdtesting.NewTestFactory()
 			defer tf.Cleanup()
 
-			o := DrainCmdOptions{
+			o := DrainOptions{
 				PrintFlags: genericclioptions.NewPrintFlags("drained").WithTypeSetter(scheme.Scheme),
 			}
 			o.Out = os.Stdout
@@ -1046,6 +1002,6 @@ func (m *MyReq) isFor(method string, path string) bool {
 
 	return method == req.Method && (req.URL.Path == path ||
 		req.URL.Path == strings.Join([]string{"/api/v1", path}, "") ||
-		req.URL.Path == strings.Join([]string{"/apis/apps/v1", path}, "") ||
+		req.URL.Path == strings.Join([]string{"/apis/extensions/v1beta1", path}, "") ||
 		req.URL.Path == strings.Join([]string{"/apis/batch/v1", path}, ""))
 }

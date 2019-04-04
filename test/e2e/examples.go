@@ -28,7 +28,6 @@ import (
 	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	clientset "k8s.io/client-go/kubernetes"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
-	commonutils "k8s.io/kubernetes/test/e2e/common"
 	"k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/framework/testfiles"
 
@@ -63,8 +62,8 @@ var _ = framework.KubeDescribe("[Feature:Example]", func() {
 	framework.KubeDescribe("Liveness", func() {
 		It("liveness pods should be automatically restarted", func() {
 			test := "test/fixtures/doc-yaml/user-guide/liveness"
-			execYaml := readFile(test, "exec-liveness.yaml.in")
-			httpYaml := readFile(test, "http-liveness.yaml.in")
+			execYaml := readFile(test, "exec-liveness.yaml")
+			httpYaml := readFile(test, "http-liveness.yaml")
 			nsFlag := fmt.Sprintf("--namespace=%v", ns)
 
 			framework.RunKubectlOrDieInput(execYaml, "create", "-f", "-", nsFlag)
@@ -112,7 +111,7 @@ var _ = framework.KubeDescribe("[Feature:Example]", func() {
 		It("should create a pod that reads a secret", func() {
 			test := "test/fixtures/doc-yaml/user-guide/secrets"
 			secretYaml := readFile(test, "secret.yaml")
-			podYaml := readFile(test, "secret-pod.yaml.in")
+			podYaml := readFile(test, "secret-pod.yaml")
 
 			nsFlag := fmt.Sprintf("--namespace=%v", ns)
 			podName := "secret-test-pod"
@@ -132,7 +131,7 @@ var _ = framework.KubeDescribe("[Feature:Example]", func() {
 	framework.KubeDescribe("Downward API", func() {
 		It("should create a pod that prints his name and namespace", func() {
 			test := "test/fixtures/doc-yaml/user-guide/downward-api"
-			podYaml := readFile(test, "dapi-pod.yaml.in")
+			podYaml := readFile(test, "dapi-pod.yaml")
 			nsFlag := fmt.Sprintf("--namespace=%v", ns)
 			podName := "dapi-test-pod"
 
@@ -152,5 +151,5 @@ var _ = framework.KubeDescribe("[Feature:Example]", func() {
 
 func readFile(test, file string) string {
 	from := filepath.Join(test, file)
-	return commonutils.SubstituteImageName(string(testfiles.ReadOrDie(from, Fail)))
+	return string(testfiles.ReadOrDie(from, Fail))
 }

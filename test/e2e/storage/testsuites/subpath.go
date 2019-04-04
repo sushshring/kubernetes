@@ -19,14 +19,15 @@ package testsuites
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/storage/drivers"
 	"k8s.io/kubernetes/test/e2e/storage/testpatterns"
 	"k8s.io/kubernetes/test/e2e/storage/utils"
 	imageutils "k8s.io/kubernetes/test/utils/image"
@@ -71,354 +72,306 @@ func (s *subPathTestSuite) getTestSuiteInfo() TestSuiteInfo {
 	return s.tsInfo
 }
 
-func (s *subPathTestSuite) defineTests(driver TestDriver, pattern testpatterns.TestPattern) {
-	type local struct {
-		config      *PerTestConfig
-		testCleanup func()
+func (s *subPathTestSuite) skipUnsupportedTest(pattern testpatterns.TestPattern, driver drivers.TestDriver) {
+}
 
-		resource          *genericVolumeTestResource
-		roVolSource       *v1.VolumeSource
-		pod               *v1.Pod
-		formatPod         *v1.Pod
-		subPathDir        string
-		filePathInSubpath string
-		filePathInVolume  string
+func createSubPathTestInput(pattern testpatterns.TestPattern, resource subPathTestResource) subPathTestInput {
+	driver := resource.driver
+	dInfo := driver.GetDriverInfo()
+	f := dInfo.Framework
+	subPath := f.Namespace.Name
+	subPathDir := filepath.Join(volumePath, subPath)
+
+	return subPathTestInput{
+		f:                 f,
+		subPathDir:        subPathDir,
+		filePathInSubpath: filepath.Join(volumePath, fileName),
+		filePathInVolume:  filepath.Join(subPathDir, fileName),
+		volType:           resource.volType,
+		pod:               resource.pod,
+		formatPod:         resource.formatPod,
+		volSource:         resource.genericVolumeTestResource.volSource,
+		roVol:             resource.roVolSource,
 	}
-	var l local
+}
 
-	// No preconditions to test. Normally they would be in a BeforeEach here.
+func (s *subPathTestSuite) execTest(driver drivers.TestDriver, pattern testpatterns.TestPattern) {
+	Context(getTestNameStr(s, pattern), func() {
+		var (
+			resource     subPathTestResource
+			input        subPathTestInput
+			needsCleanup bool
+		)
 
-	// This intentionally comes after checking the preconditions because it
-	// registers its own BeforeEach which creates the namespace. Beware that it
-	// also registers an AfterEach which renders f unusable. Any code using
-	// f must run inside an It or Context callback.
-	f := framework.NewDefaultFramework("provisioning")
+		BeforeEach(func() {
+			needsCleanup = false
+			// Skip unsupported tests to avoid unnecessary resource initialization
+			skipUnsupportedTest(s, driver, pattern)
+			needsCleanup = true
 
-	init := func() {
-		l = local{}
+			// Setup test resource for driver and testpattern
+			resource = subPathTestResource{}
+			resource.setupResource(driver, pattern)
 
-		// Now do the more expensive test initialization.
-		l.config, l.testCleanup = driver.PrepareTest(f)
-		l.resource = createGenericVolumeTestResource(driver, l.config, pattern)
+			// Create test input
+			input = createSubPathTestInput(pattern, resource)
+		})
 
-		// Setup subPath test dependent resource
-		volType := pattern.VolType
-		switch volType {
-		case testpatterns.InlineVolume:
-			if iDriver, ok := driver.(InlineVolumeTestDriver); ok {
-				l.roVolSource = iDriver.GetVolumeSource(true, pattern.FsType, l.resource.volume)
+		AfterEach(func() {
+			if needsCleanup {
+				resource.cleanupResource(driver, pattern)
 			}
-		case testpatterns.PreprovisionedPV:
-			l.roVolSource = &v1.VolumeSource{
-				PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
-					ClaimName: l.resource.pvc.Name,
-					ReadOnly:  true,
-				},
-			}
-		case testpatterns.DynamicPV:
-			l.roVolSource = &v1.VolumeSource{
-				PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
-					ClaimName: l.resource.pvc.Name,
-					ReadOnly:  true,
-				},
-			}
-		default:
-			framework.Failf("SubPath test doesn't support: %s", volType)
+		})
+
+		testSubPath(&input)
+	})
+}
+
+type subPathTestResource struct {
+	genericVolumeTestResource
+
+	roVolSource *v1.VolumeSource
+	pod         *v1.Pod
+	formatPod   *v1.Pod
+}
+
+var _ TestResource = &subPathTestResource{}
+
+func (s *subPathTestResource) setupResource(driver drivers.TestDriver, pattern testpatterns.TestPattern) {
+	s.driver = driver
+	dInfo := s.driver.GetDriverInfo()
+	f := dInfo.Framework
+	fsType := pattern.FsType
+	volType := pattern.VolType
+
+	// Setup generic test resource
+	s.genericVolumeTestResource.setupResource(driver, pattern)
+
+	// Setup subPath test dependent resource
+	switch volType {
+	case testpatterns.InlineVolume:
+		if iDriver, ok := driver.(drivers.InlineVolumeTestDriver); ok {
+			s.roVolSource = iDriver.GetVolumeSource(true, fsType, s.genericVolumeTestResource.driverTestResource)
 		}
-
-		subPath := f.Namespace.Name
-		l.pod = SubpathTestPod(f, subPath, l.resource.volType, l.resource.volSource, true)
-		l.pod.Spec.NodeName = l.config.ClientNodeName
-		l.pod.Spec.NodeSelector = l.config.ClientNodeSelector
-
-		l.formatPod = volumeFormatPod(f, l.resource.volSource)
-		l.formatPod.Spec.NodeName = l.config.ClientNodeName
-		l.formatPod.Spec.NodeSelector = l.config.ClientNodeSelector
-
-		l.subPathDir = filepath.Join(volumePath, subPath)
-		l.filePathInSubpath = filepath.Join(volumePath, fileName)
-		l.filePathInVolume = filepath.Join(l.subPathDir, fileName)
+	case testpatterns.PreprovisionedPV:
+		s.roVolSource = &v1.VolumeSource{
+			PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+				ClaimName: s.genericVolumeTestResource.pvc.Name,
+				ReadOnly:  true,
+			},
+		}
+	case testpatterns.DynamicPV:
+		s.roVolSource = &v1.VolumeSource{
+			PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+				ClaimName: s.genericVolumeTestResource.pvc.Name,
+				ReadOnly:  true,
+			},
+		}
+	default:
+		framework.Failf("SubPath test doesn't support: %s", volType)
 	}
 
-	cleanup := func() {
-		if l.pod != nil {
-			By("Deleting pod")
-			err := framework.DeletePodWithWait(f, f.ClientSet, l.pod)
-			Expect(err).ToNot(HaveOccurred(), "while deleting pod")
-			l.pod = nil
-		}
+	subPath := f.Namespace.Name
+	config := dInfo.Config
+	s.pod = SubpathTestPod(f, subPath, s.volType, s.volSource, true)
+	s.pod.Spec.NodeName = config.ClientNodeName
+	s.pod.Spec.NodeSelector = config.NodeSelector
 
-		if l.resource != nil {
-			l.resource.cleanupResource()
-			l.resource = nil
-		}
+	s.formatPod = volumeFormatPod(f, s.volSource)
+	s.formatPod.Spec.NodeName = config.ClientNodeName
+	s.formatPod.Spec.NodeSelector = config.NodeSelector
+}
 
-		if l.testCleanup != nil {
-			l.testCleanup()
-			l.testCleanup = nil
-		}
-	}
+func (s *subPathTestResource) cleanupResource(driver drivers.TestDriver, pattern testpatterns.TestPattern) {
+	dInfo := driver.GetDriverInfo()
+	f := dInfo.Framework
 
+	// Cleanup subPath test dependent resource
+	By("Deleting pod")
+	err := framework.DeletePodWithWait(f, f.ClientSet, s.pod)
+	Expect(err).ToNot(HaveOccurred(), "while deleting pod")
+
+	// Cleanup generic test resource
+	s.genericVolumeTestResource.cleanupResource(driver, pattern)
+}
+
+type subPathTestInput struct {
+	f                 *framework.Framework
+	subPathDir        string
+	filePathInSubpath string
+	filePathInVolume  string
+	volType           string
+	pod               *v1.Pod
+	formatPod         *v1.Pod
+	volSource         *v1.VolumeSource
+	roVol             *v1.VolumeSource
+}
+
+func testSubPath(input *subPathTestInput) {
 	It("should support non-existent path", func() {
-		init()
-		defer cleanup()
-
-		// Write the file in the subPath from init container 1
-		setWriteCommand(l.filePathInSubpath, &l.pod.Spec.InitContainers[1])
+		// Write the file in the subPath from container 0
+		setWriteCommand(input.filePathInSubpath, &input.pod.Spec.Containers[0])
 
 		// Read it from outside the subPath from container 1
-		testReadFile(f, l.filePathInVolume, l.pod, 1)
+		testReadFile(input.f, input.filePathInVolume, input.pod, 1)
 	})
 
 	It("should support existing directory", func() {
-		init()
-		defer cleanup()
-
 		// Create the directory
-		setInitCommand(l.pod, fmt.Sprintf("mkdir -p %s", l.subPathDir))
+		setInitCommand(input.pod, fmt.Sprintf("mkdir -p %s", input.subPathDir))
 
-		// Write the file in the subPath from init container 1
-		setWriteCommand(l.filePathInSubpath, &l.pod.Spec.InitContainers[1])
+		// Write the file in the subPath from container 0
+		setWriteCommand(input.filePathInSubpath, &input.pod.Spec.Containers[0])
 
 		// Read it from outside the subPath from container 1
-		testReadFile(f, l.filePathInVolume, l.pod, 1)
+		testReadFile(input.f, input.filePathInVolume, input.pod, 1)
 	})
 
 	It("should support existing single file", func() {
-		init()
-		defer cleanup()
-
 		// Create the file in the init container
-		setInitCommand(l.pod, fmt.Sprintf("mkdir -p %s; echo \"mount-tester new file\" > %s", l.subPathDir, l.filePathInVolume))
+		setInitCommand(input.pod, fmt.Sprintf("mkdir -p %s; echo \"mount-tester new file\" > %s", input.subPathDir, input.filePathInVolume))
 
 		// Read it from inside the subPath from container 0
-		testReadFile(f, l.filePathInSubpath, l.pod, 0)
+		testReadFile(input.f, input.filePathInSubpath, input.pod, 0)
 	})
 
 	It("should support file as subpath", func() {
-		init()
-		defer cleanup()
-
 		// Create the file in the init container
-		setInitCommand(l.pod, fmt.Sprintf("echo %s > %s", f.Namespace.Name, l.subPathDir))
+		setInitCommand(input.pod, fmt.Sprintf("echo %s > %s", input.f.Namespace.Name, input.subPathDir))
 
-		TestBasicSubpath(f, f.Namespace.Name, l.pod)
+		TestBasicSubpath(input.f, input.f.Namespace.Name, input.pod)
 	})
 
 	It("should fail if subpath directory is outside the volume [Slow]", func() {
-		init()
-		defer cleanup()
-
 		// Create the subpath outside the volume
-		setInitCommand(l.pod, fmt.Sprintf("ln -s /bin %s", l.subPathDir))
+		setInitCommand(input.pod, fmt.Sprintf("ln -s /bin %s", input.subPathDir))
 
 		// Pod should fail
-		testPodFailSubpath(f, l.pod, false)
+		testPodFailSubpath(input.f, input.pod)
 	})
 
 	It("should fail if subpath file is outside the volume [Slow]", func() {
-		init()
-		defer cleanup()
-
 		// Create the subpath outside the volume
-		setInitCommand(l.pod, fmt.Sprintf("ln -s /bin/sh %s", l.subPathDir))
+		setInitCommand(input.pod, fmt.Sprintf("ln -s /bin/sh %s", input.subPathDir))
 
 		// Pod should fail
-		testPodFailSubpath(f, l.pod, false)
+		testPodFailSubpath(input.f, input.pod)
 	})
 
 	It("should fail if non-existent subpath is outside the volume [Slow]", func() {
-		init()
-		defer cleanup()
-
 		// Create the subpath outside the volume
-		setInitCommand(l.pod, fmt.Sprintf("ln -s /bin/notanexistingpath %s", l.subPathDir))
+		setInitCommand(input.pod, fmt.Sprintf("ln -s /bin/notanexistingpath %s", input.subPathDir))
 
 		// Pod should fail
-		testPodFailSubpath(f, l.pod, false)
+		testPodFailSubpath(input.f, input.pod)
 	})
 
 	It("should fail if subpath with backstepping is outside the volume [Slow]", func() {
-		init()
-		defer cleanup()
-
 		// Create the subpath outside the volume
-		setInitCommand(l.pod, fmt.Sprintf("ln -s ../ %s", l.subPathDir))
+		setInitCommand(input.pod, fmt.Sprintf("ln -s ../ %s", input.subPathDir))
 
 		// Pod should fail
-		testPodFailSubpath(f, l.pod, false)
+		testPodFailSubpath(input.f, input.pod)
 	})
 
 	It("should support creating multiple subpath from same volumes [Slow]", func() {
-		init()
-		defer cleanup()
-
 		subpathDir1 := filepath.Join(volumePath, "subpath1")
 		subpathDir2 := filepath.Join(volumePath, "subpath2")
 		filepath1 := filepath.Join("/test-subpath1", fileName)
 		filepath2 := filepath.Join("/test-subpath2", fileName)
-		setInitCommand(l.pod, fmt.Sprintf("mkdir -p %s; mkdir -p %s", subpathDir1, subpathDir2))
+		setInitCommand(input.pod, fmt.Sprintf("mkdir -p %s; mkdir -p %s", subpathDir1, subpathDir2))
 
-		addSubpathVolumeContainer(&l.pod.Spec.Containers[0], v1.VolumeMount{
+		addSubpathVolumeContainer(&input.pod.Spec.Containers[0], v1.VolumeMount{
 			Name:      volumeName,
 			MountPath: "/test-subpath1",
 			SubPath:   "subpath1",
 		})
-		addSubpathVolumeContainer(&l.pod.Spec.Containers[0], v1.VolumeMount{
+		addSubpathVolumeContainer(&input.pod.Spec.Containers[0], v1.VolumeMount{
 			Name:      volumeName,
 			MountPath: "/test-subpath2",
 			SubPath:   "subpath2",
 		})
 
-		// Write the files from container 0 and instantly read them back
-		addMultipleWrites(&l.pod.Spec.Containers[0], filepath1, filepath2)
-		testMultipleReads(f, l.pod, 0, filepath1, filepath2)
+		addMultipleWrites(&input.pod.Spec.Containers[0], filepath1, filepath2)
+		testMultipleReads(input.f, input.pod, 0, filepath1, filepath2)
 	})
 
 	It("should support restarting containers using directory as subpath [Slow]", func() {
-		init()
-		defer cleanup()
-
 		// Create the directory
-		setInitCommand(l.pod, fmt.Sprintf("mkdir -p %v; touch %v", l.subPathDir, probeFilePath))
+		setInitCommand(input.pod, fmt.Sprintf("mkdir -p %v; touch %v", input.subPathDir, probeFilePath))
 
-		testPodContainerRestart(f, l.pod)
+		testPodContainerRestart(input.f, input.pod)
 	})
 
 	It("should support restarting containers using file as subpath [Slow]", func() {
-		init()
-		defer cleanup()
-
 		// Create the file
-		setInitCommand(l.pod, fmt.Sprintf("touch %v; touch %v", l.subPathDir, probeFilePath))
+		setInitCommand(input.pod, fmt.Sprintf("touch %v; touch %v", input.subPathDir, probeFilePath))
 
-		testPodContainerRestart(f, l.pod)
+		testPodContainerRestart(input.f, input.pod)
 	})
 
 	It("should unmount if pod is gracefully deleted while kubelet is down [Disruptive][Slow]", func() {
-		init()
-		defer cleanup()
-
-		testSubpathReconstruction(f, l.pod, false)
+		testSubpathReconstruction(input.f, input.pod, false)
 	})
 
 	It("should unmount if pod is force deleted while kubelet is down [Disruptive][Slow]", func() {
-		init()
-		defer cleanup()
-
-		if strings.HasPrefix(l.resource.volType, "hostPath") || strings.HasPrefix(l.resource.volType, "csi-hostpath") {
-			// TODO: This skip should be removed once #61446 is fixed
-			framework.Skipf("%s volume type does not support reconstruction, skipping", l.resource.volType)
+		if input.volType == "hostPath" || input.volType == "hostPathSymlink" {
+			framework.Skipf("%s volume type does not support reconstruction, skipping", input.volType)
 		}
-
-		testSubpathReconstruction(f, l.pod, true)
+		testSubpathReconstruction(input.f, input.pod, true)
 	})
 
 	It("should support readOnly directory specified in the volumeMount", func() {
-		init()
-		defer cleanup()
-
 		// Create the directory
-		setInitCommand(l.pod, fmt.Sprintf("mkdir -p %s", l.subPathDir))
+		setInitCommand(input.pod, fmt.Sprintf("mkdir -p %s", input.subPathDir))
 
-		// Write the file in the volume from init container 2
-		setWriteCommand(l.filePathInVolume, &l.pod.Spec.InitContainers[2])
+		// Write the file in the volume from container 1
+		setWriteCommand(input.filePathInVolume, &input.pod.Spec.Containers[1])
 
 		// Read it from inside the subPath from container 0
-		l.pod.Spec.Containers[0].VolumeMounts[0].ReadOnly = true
-		testReadFile(f, l.filePathInSubpath, l.pod, 0)
+		input.pod.Spec.Containers[0].VolumeMounts[0].ReadOnly = true
+		testReadFile(input.f, input.filePathInSubpath, input.pod, 0)
 	})
 
 	It("should support readOnly file specified in the volumeMount", func() {
-		init()
-		defer cleanup()
-
 		// Create the file
-		setInitCommand(l.pod, fmt.Sprintf("touch %s", l.subPathDir))
+		setInitCommand(input.pod, fmt.Sprintf("touch %s", input.subPathDir))
 
-		// Write the file in the volume from init container 2
-		setWriteCommand(l.subPathDir, &l.pod.Spec.InitContainers[2])
+		// Write the file in the volume from container 1
+		setWriteCommand(input.subPathDir, &input.pod.Spec.Containers[1])
 
 		// Read it from inside the subPath from container 0
-		l.pod.Spec.Containers[0].VolumeMounts[0].ReadOnly = true
-		testReadFile(f, volumePath, l.pod, 0)
+		input.pod.Spec.Containers[0].VolumeMounts[0].ReadOnly = true
+		testReadFile(input.f, volumePath, input.pod, 0)
 	})
 
 	It("should support existing directories when readOnly specified in the volumeSource", func() {
-		init()
-		defer cleanup()
-		if l.roVolSource == nil {
-			framework.Skipf("Volume type %v doesn't support readOnly source", l.resource.volType)
+		if input.roVol == nil {
+			framework.Skipf("Volume type %v doesn't support readOnly source", input.volType)
 		}
 
-		origpod := l.pod.DeepCopy()
-
-		// Create the directory
-		setInitCommand(l.pod, fmt.Sprintf("mkdir -p %s", l.subPathDir))
-
-		// Write the file in the subPath from init container 1
-		setWriteCommand(l.filePathInSubpath, &l.pod.Spec.InitContainers[1])
-
-		// Read it from inside the subPath from container 0
-		testReadFile(f, l.filePathInSubpath, l.pod, 0)
-
-		// Reset the pod
-		l.pod = origpod
+		// Initialize content in the volume while it's writable
+		initVolumeContent(input.f, input.pod, input.filePathInVolume, input.filePathInSubpath)
 
 		// Set volume source to read only
-		l.pod.Spec.Volumes[0].VolumeSource = *l.roVolSource
+		input.pod.Spec.Volumes[0].VolumeSource = *input.roVol
 
 		// Read it from inside the subPath from container 0
-		testReadFile(f, l.filePathInSubpath, l.pod, 0)
+		testReadFile(input.f, input.filePathInSubpath, input.pod, 0)
 	})
 
-	It("should verify container cannot write to subpath readonly volumes", func() {
-		init()
-		defer cleanup()
-		if l.roVolSource == nil {
-			framework.Skipf("Volume type %v doesn't support readOnly source", l.resource.volType)
+	It("should fail for new directories when readOnly specified in the volumeSource [Slow]", func() {
+		if input.roVol == nil {
+			framework.Skipf("Volume type %v doesn't support readOnly source", input.volType)
 		}
 
 		// Format the volume while it's writable
-		formatVolume(f, l.formatPod)
+		formatVolume(input.f, input.formatPod)
 
 		// Set volume source to read only
-		l.pod.Spec.Volumes[0].VolumeSource = *l.roVolSource
-
-		// Write the file in the volume from container 0
-		setWriteCommand(l.subPathDir, &l.pod.Spec.Containers[0])
-
+		input.pod.Spec.Volumes[0].VolumeSource = *input.roVol
 		// Pod should fail
-		testPodFailSubpath(f, l.pod, true)
-	})
-
-	It("should be able to unmount after the subpath directory is deleted", func() {
-		init()
-		defer cleanup()
-
-		// Change volume container to busybox so we can exec later
-		l.pod.Spec.Containers[1].Image = imageutils.GetE2EImage(imageutils.BusyBox)
-		l.pod.Spec.Containers[1].Command = []string{"/bin/sh", "-ec", "sleep 100000"}
-
-		By(fmt.Sprintf("Creating pod %s", l.pod.Name))
-		removeUnusedContainers(l.pod)
-		pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(l.pod)
-		Expect(err).ToNot(HaveOccurred(), "while creating pod")
-		defer func() {
-			By(fmt.Sprintf("Deleting pod %s", pod.Name))
-			framework.DeletePodWithWait(f, f.ClientSet, pod)
-		}()
-
-		// Wait for pod to be running
-		err = framework.WaitForPodRunningInNamespace(f.ClientSet, l.pod)
-		Expect(err).ToNot(HaveOccurred(), "while waiting for pod to be running")
-
-		// Exec into container that mounted the volume, delete subpath directory
-		rmCmd := fmt.Sprintf("rm -rf %s", l.subPathDir)
-		_, err = podContainerExec(l.pod, 1, rmCmd)
-		Expect(err).ToNot(HaveOccurred(), "while removing subpath directory")
-
-		// Delete pod (from defer) and wait for it to be successfully deleted
+		testPodFailSubpathError(input.f, input.pod, "")
 	})
 
 	// TODO: add a test case for the same disk with two partitions
@@ -434,7 +387,6 @@ func TestBasicSubpathFile(f *framework.Framework, contents string, pod *v1.Pod, 
 	setReadCommand(filepath, &pod.Spec.Containers[0])
 
 	By(fmt.Sprintf("Creating pod %s", pod.Name))
-	removeUnusedContainers(pod)
 	f.TestContainerOutput("atomic-volume-subpath", pod, 0, []string{contents})
 
 	By(fmt.Sprintf("Deleting pod %s", pod.Name))
@@ -442,23 +394,10 @@ func TestBasicSubpathFile(f *framework.Framework, contents string, pod *v1.Pod, 
 	Expect(err).NotTo(HaveOccurred(), "while deleting pod")
 }
 
-func generateSuffixForPodName(s string) string {
-	// Pod name must:
-	//   1. consist of lower case alphanumeric characters or '-',
-	//   2. start and end with an alphanumeric character.
-	// (e.g. 'my-name',  or '123-abc', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?')
-	// Therefore, suffix is generated by following steps:
-	//   1. all strings other than [A-Za-z0-9] is replaced with "-",
-	//   2. add lower case alphanumeric characters at the end ('-[a-z0-9]{4}' is added),
-	//   3. convert the entire strings to lower case.
-	re := regexp.MustCompile("[^A-Za-z0-9]")
-	return strings.ToLower(fmt.Sprintf("%s-%s", re.ReplaceAllString(s, "-"), rand.String(4)))
-}
-
 // SubpathTestPod returns a pod spec for subpath tests
 func SubpathTestPod(f *framework.Framework, subpath, volumeType string, source *v1.VolumeSource, privilegedSecurityContext bool) *v1.Pod {
 	var (
-		suffix          = generateSuffixForPodName(volumeType)
+		suffix          = strings.ToLower(fmt.Sprintf("%s-%s", volumeType, rand.String(4)))
 		gracePeriod     = int64(1)
 		probeVolumeName = "liveness-probe-volume"
 	)
@@ -472,41 +411,6 @@ func SubpathTestPod(f *framework.Framework, subpath, volumeType string, source *
 				{
 					Name:  fmt.Sprintf("init-volume-%s", suffix),
 					Image: imageutils.GetE2EImage(imageutils.BusyBox),
-					VolumeMounts: []v1.VolumeMount{
-						{
-							Name:      volumeName,
-							MountPath: volumePath,
-						},
-						{
-							Name:      probeVolumeName,
-							MountPath: probeVolumePath,
-						},
-					},
-					SecurityContext: &v1.SecurityContext{
-						Privileged: &privilegedSecurityContext,
-					},
-				},
-				{
-					Name:  fmt.Sprintf("test-init-subpath-%s", suffix),
-					Image: mountImage,
-					VolumeMounts: []v1.VolumeMount{
-						{
-							Name:      volumeName,
-							MountPath: volumePath,
-							SubPath:   subpath,
-						},
-						{
-							Name:      probeVolumeName,
-							MountPath: probeVolumePath,
-						},
-					},
-					SecurityContext: &v1.SecurityContext{
-						Privileged: &privilegedSecurityContext,
-					},
-				},
-				{
-					Name:  fmt.Sprintf("test-init-volume-%s", suffix),
-					Image: mountImage,
 					VolumeMounts: []v1.VolumeMount{
 						{
 							Name:      volumeName,
@@ -582,33 +486,6 @@ func SubpathTestPod(f *framework.Framework, subpath, volumeType string, source *
 	}
 }
 
-func containerIsUnused(container *v1.Container) bool {
-	// mountImage with nil Args does nothing. Leave everything else
-	return container.Image == mountImage && container.Args == nil
-}
-
-// removeUnusedContainers removes containers from a SubpathTestPod that aren't
-// needed for a test. e.g. to test for subpath mount failure, only one
-// container needs to run and get its status checked.
-func removeUnusedContainers(pod *v1.Pod) {
-	initContainers := []v1.Container{}
-	containers := []v1.Container{}
-	if pod.Spec.InitContainers[0].Command != nil {
-		initContainers = append(initContainers, pod.Spec.InitContainers[0])
-	}
-	for _, ic := range pod.Spec.InitContainers[1:] {
-		if !containerIsUnused(&ic) {
-			initContainers = append(initContainers, ic)
-		}
-	}
-	containers = append(containers, pod.Spec.Containers[0])
-	if !containerIsUnused(&pod.Spec.Containers[1]) {
-		containers = append(containers, pod.Spec.Containers[1])
-	}
-	pod.Spec.InitContainers = initContainers
-	pod.Spec.Containers = containers
-}
-
 // volumeFormatPod returns a Pod that does nothing but will cause the plugin to format a filesystem
 // on first use
 func volumeFormatPod(f *framework.Framework, volumeSource *v1.VolumeSource) *v1.Pod {
@@ -643,8 +520,6 @@ func volumeFormatPod(f *framework.Framework, volumeSource *v1.VolumeSource) *v1.
 
 func clearSubpathPodCommands(pod *v1.Pod) {
 	pod.Spec.InitContainers[0].Command = nil
-	pod.Spec.InitContainers[1].Args = nil
-	pod.Spec.InitContainers[2].Args = nil
 	pod.Spec.Containers[0].Args = nil
 	pod.Spec.Containers[1].Args = nil
 }
@@ -674,7 +549,6 @@ func addMultipleWrites(container *v1.Container, file1 string, file2 string) {
 
 func testMultipleReads(f *framework.Framework, pod *v1.Pod, containerIndex int, file1 string, file2 string) {
 	By(fmt.Sprintf("Creating pod %s", pod.Name))
-	removeUnusedContainers(pod)
 	f.TestContainerOutput("multi_subpath", pod, containerIndex, []string{
 		"content of file \"" + file1 + "\": mount-tester new file",
 		"content of file \"" + file2 + "\": mount-tester new file",
@@ -692,7 +566,6 @@ func testReadFile(f *framework.Framework, file string, pod *v1.Pod, containerInd
 	setReadCommand(file, &pod.Spec.Containers[containerIndex])
 
 	By(fmt.Sprintf("Creating pod %s", pod.Name))
-	removeUnusedContainers(pod)
 	f.TestContainerOutput("subpath", pod, containerIndex, []string{
 		"content of file \"" + file + "\": mount-tester new file",
 	})
@@ -702,67 +575,29 @@ func testReadFile(f *framework.Framework, file string, pod *v1.Pod, containerInd
 	Expect(err).NotTo(HaveOccurred(), "while deleting pod")
 }
 
-func testPodFailSubpath(f *framework.Framework, pod *v1.Pod, allowContainerTerminationError bool) {
-	testPodFailSubpathError(f, pod, "subPath", allowContainerTerminationError)
+func testPodFailSubpath(f *framework.Framework, pod *v1.Pod) {
+	testPodFailSubpathError(f, pod, "subPath")
 }
 
-func testPodFailSubpathError(f *framework.Framework, pod *v1.Pod, errorMsg string, allowContainerTerminationError bool) {
+func testPodFailSubpathError(f *framework.Framework, pod *v1.Pod, errorMsg string) {
 	By(fmt.Sprintf("Creating pod %s", pod.Name))
-	removeUnusedContainers(pod)
 	pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(pod)
 	Expect(err).ToNot(HaveOccurred(), "while creating pod")
 	defer func() {
 		framework.DeletePodWithWait(f, f.ClientSet, pod)
 	}()
-	By("Checking for subpath error in container status")
-	err = waitForPodSubpathError(f, pod, allowContainerTerminationError)
-	Expect(err).NotTo(HaveOccurred(), "while waiting for subpath failure")
-}
+	err = framework.WaitForPodRunningInNamespace(f.ClientSet, pod)
+	Expect(err).To(HaveOccurred(), "while waiting for pod to be running")
 
-func findSubpathContainerName(pod *v1.Pod) string {
-	for _, container := range pod.Spec.Containers {
-		for _, mount := range container.VolumeMounts {
-			if mount.SubPath != "" {
-				return container.Name
-			}
-		}
-	}
-	return ""
-}
-
-func waitForPodSubpathError(f *framework.Framework, pod *v1.Pod, allowContainerTerminationError bool) error {
-	subpathContainerName := findSubpathContainerName(pod)
-	if subpathContainerName == "" {
-		return fmt.Errorf("failed to find container that uses subpath")
-	}
-
-	return wait.PollImmediate(framework.Poll, framework.PodStartTimeout, func() (bool, error) {
-		pod, err := f.ClientSet.CoreV1().Pods(pod.Namespace).Get(pod.Name, metav1.GetOptions{})
-		if err != nil {
-			return false, err
-		}
-		for _, status := range pod.Status.ContainerStatuses {
-			// 0 is the container that uses subpath
-			if status.Name == subpathContainerName {
-				switch {
-				case status.State.Terminated != nil:
-					if status.State.Terminated.ExitCode != 0 && allowContainerTerminationError {
-						return true, nil
-					}
-					return false, fmt.Errorf("subpath container unexpectedly terminated")
-				case status.State.Waiting != nil:
-					if status.State.Waiting.Reason == "CreateContainerConfigError" &&
-						strings.Contains(status.State.Waiting.Message, "subPath") {
-						return true, nil
-					}
-					return false, nil
-				default:
-					return false, nil
-				}
-			}
-		}
-		return false, nil
-	})
+	By("Checking for subpath error event")
+	selector := fields.Set{
+		"involvedObject.kind":      "Pod",
+		"involvedObject.name":      pod.Name,
+		"involvedObject.namespace": f.Namespace.Name,
+		"reason":                   "Failed",
+	}.AsSelector().String()
+	err = framework.WaitTimeoutForPodEvent(f.ClientSet, pod.Name, f.Namespace.Name, selector, errorMsg, framework.PodEventTimeout)
+	Expect(err).NotTo(HaveOccurred(), "while waiting for failed event to occur")
 }
 
 // Tests that the existing subpath mount is detected when a container restarts
@@ -788,7 +623,6 @@ func testPodContainerRestart(f *framework.Framework, pod *v1.Pod) {
 
 	// Start pod
 	By(fmt.Sprintf("Creating pod %s", pod.Name))
-	removeUnusedContainers(pod)
 	pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(pod)
 	Expect(err).ToNot(HaveOccurred(), "while creating pod")
 	defer func() {
@@ -876,7 +710,6 @@ func testSubpathReconstruction(f *framework.Framework, pod *v1.Pod, forceDelete 
 	pod.Spec.TerminationGracePeriodSeconds = &gracePeriod
 
 	By(fmt.Sprintf("Creating pod %s", pod.Name))
-	removeUnusedContainers(pod)
 	pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(pod)
 	Expect(err).ToNot(HaveOccurred(), "while creating pod")
 
@@ -899,6 +732,23 @@ func formatVolume(f *framework.Framework, pod *v1.Pod) {
 
 	err = framework.DeletePodWithWait(f, f.ClientSet, pod)
 	Expect(err).ToNot(HaveOccurred(), "while deleting volume init pod")
+}
+
+func initVolumeContent(f *framework.Framework, pod *v1.Pod, volumeFilepath, subpathFilepath string) {
+	setWriteCommand(volumeFilepath, &pod.Spec.Containers[1])
+	setReadCommand(subpathFilepath, &pod.Spec.Containers[0])
+
+	By(fmt.Sprintf("Creating pod to write volume content %s", pod.Name))
+	f.TestContainerOutput("subpath", pod, 0, []string{
+		"content of file \"" + subpathFilepath + "\": mount-tester new file",
+	})
+
+	By(fmt.Sprintf("Deleting pod %s", pod.Name))
+	err := framework.DeletePodWithWait(f, f.ClientSet, pod)
+	Expect(err).NotTo(HaveOccurred(), "while deleting pod")
+
+	// This pod spec is going to be reused; reset all the commands
+	clearSubpathPodCommands(pod)
 }
 
 func podContainerExec(pod *v1.Pod, containerIndex int, bashExec string) (string, error) {

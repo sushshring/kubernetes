@@ -21,7 +21,7 @@ import (
 	info "github.com/google/cadvisor/info/v1"
 
 	"cloud.google.com/go/compute/metadata"
-	"k8s.io/klog"
+	"github.com/golang/glog"
 )
 
 const (
@@ -32,7 +32,7 @@ const (
 func onGCE() bool {
 	data, err := ioutil.ReadFile(gceProductName)
 	if err != nil {
-		klog.V(2).Infof("Error while reading product_name: %v", err)
+		glog.V(2).Infof("Error while reading product_name: %v", err)
 		return false
 	}
 	return strings.Contains(string(data), google)

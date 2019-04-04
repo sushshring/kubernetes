@@ -19,9 +19,8 @@ import (
 
 	info "github.com/google/cadvisor/info/v1"
 
-	"github.com/google/cadvisor/container"
+	"github.com/golang/glog"
 	"github.com/opencontainers/runc/libcontainer/cgroups"
-	"k8s.io/klog"
 )
 
 type CgroupSubsystems struct {
@@ -34,36 +33,18 @@ type CgroupSubsystems struct {
 	MountPoints map[string]string
 }
 
-// Get information about the cgroup subsystems those we want
-func GetCgroupSubsystems(includedMetrics container.MetricSet) (CgroupSubsystems, error) {
+// Get information about the cgroup subsystems.
+func GetCgroupSubsystems() (CgroupSubsystems, error) {
 	// Get all cgroup mounts.
 	allCgroups, err := cgroups.GetCgroupMounts(true)
 	if err != nil {
 		return CgroupSubsystems{}, err
 	}
 
-	disableCgroups := map[string]struct{}{}
-
-	//currently we only support disable blkio subsystem
-	if !includedMetrics.Has(container.DiskIOMetrics) {
-		disableCgroups["blkio"] = struct{}{}
-	}
-	return getCgroupSubsystemsHelper(allCgroups, disableCgroups)
+	return getCgroupSubsystemsHelper(allCgroups)
 }
 
-// Get information about all the cgroup subsystems.
-func GetAllCgroupSubsystems() (CgroupSubsystems, error) {
-	// Get all cgroup mounts.
-	allCgroups, err := cgroups.GetCgroupMounts(true)
-	if err != nil {
-		return CgroupSubsystems{}, err
-	}
-
-	emptyDisableCgroups := map[string]struct{}{}
-	return getCgroupSubsystemsHelper(allCgroups, emptyDisableCgroups)
-}
-
-func getCgroupSubsystemsHelper(allCgroups []cgroups.Mount, disableCgroups map[string]struct{}) (CgroupSubsystems, error) {
+func getCgroupSubsystemsHelper(allCgroups []cgroups.Mount) (CgroupSubsystems, error) {
 	if len(allCgroups) == 0 {
 		return CgroupSubsystems{}, fmt.Errorf("failed to find cgroup mounts")
 	}
@@ -74,16 +55,13 @@ func getCgroupSubsystemsHelper(allCgroups []cgroups.Mount, disableCgroups map[st
 	mountPoints := make(map[string]string, len(allCgroups))
 	for _, mount := range allCgroups {
 		for _, subsystem := range mount.Subsystems {
-			if _, exists := disableCgroups[subsystem]; exists {
-				continue
-			}
 			if _, ok := supportedSubsystems[subsystem]; !ok {
 				// Unsupported subsystem
 				continue
 			}
 			if _, ok := mountPoints[subsystem]; ok {
 				// duplicate mount for this subsystem; use the first one we saw
-				klog.V(5).Infof("skipping %s, already using mount at %s", mount.Mountpoint, mountPoints[subsystem])
+				glog.V(5).Infof("skipping %s, already using mount at %s", mount.Mountpoint, mountPoints[subsystem])
 				continue
 			}
 			if _, ok := recordedMountpoints[mount.Mountpoint]; !ok {

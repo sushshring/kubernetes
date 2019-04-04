@@ -43,13 +43,11 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/util/cert"
-	"k8s.io/client-go/util/keyutil"
 	apiregistrationv1beta1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1beta1"
 	aggregatorclient "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset"
 	kubeaggregatorserver "k8s.io/kube-aggregator/pkg/cmd/server"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
-	"k8s.io/kubernetes/cmd/kubeadm/app/util/pkiutil"
 	"k8s.io/kubernetes/test/integration/framework"
 	wardlev1alpha1 "k8s.io/sample-apiserver/pkg/apis/wardle/v1alpha1"
 	wardlev1beta1 "k8s.io/sample-apiserver/pkg/apis/wardle/v1beta1"
@@ -63,7 +61,7 @@ func TestAggregatedAPIServer(t *testing.T) {
 	certDir, _ := ioutil.TempDir("", "test-integration-apiserver")
 	defer os.RemoveAll(certDir)
 	_, defaultServiceClusterIPRange, _ := net.ParseCIDR("10.0.0.0/24")
-	proxySigningKey, err := pkiutil.NewPrivateKey()
+	proxySigningKey, err := cert.NewPrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,10 +70,10 @@ func TestAggregatedAPIServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	proxyCACertFile, _ := ioutil.TempFile(certDir, "proxy-ca.crt")
-	if err := ioutil.WriteFile(proxyCACertFile.Name(), pkiutil.EncodeCertPEM(proxySigningCert), 0644); err != nil {
+	if err := ioutil.WriteFile(proxyCACertFile.Name(), cert.EncodeCertPEM(proxySigningCert), 0644); err != nil {
 		t.Fatal(err)
 	}
-	clientSigningKey, err := pkiutil.NewPrivateKey()
+	clientSigningKey, err := cert.NewPrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +82,7 @@ func TestAggregatedAPIServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	clientCACertFile, _ := ioutil.TempFile(certDir, "client-ca.crt")
-	if err := ioutil.WriteFile(clientCACertFile.Name(), pkiutil.EncodeCertPEM(clientSigningCert), 0644); err != nil {
+	if err := ioutil.WriteFile(clientCACertFile.Name(), cert.EncodeCertPEM(clientSigningCert), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,7 +98,7 @@ func TestAggregatedAPIServer(t *testing.T) {
 		kubeAPIServerOptions.SecureServing.BindAddress = net.ParseIP("127.0.0.1")
 		kubeAPIServerOptions.SecureServing.ServerCert.CertDirectory = certDir
 		kubeAPIServerOptions.InsecureServing.BindPort = 0
-		kubeAPIServerOptions.Etcd.StorageConfig.Transport.ServerList = []string{framework.GetEtcdURL()}
+		kubeAPIServerOptions.Etcd.StorageConfig.ServerList = []string{framework.GetEtcdURL()}
 		kubeAPIServerOptions.ServiceClusterIPRange = *defaultServiceClusterIPRange
 		kubeAPIServerOptions.Authentication.RequestHeader.UsernameHeaders = []string{"X-Remote-User"}
 		kubeAPIServerOptions.Authentication.RequestHeader.GroupHeaders = []string{"X-Remote-Group"}
@@ -236,12 +234,12 @@ func TestAggregatedAPIServer(t *testing.T) {
 	// start the aggregator
 	aggregatorCertDir, _ := ioutil.TempDir("", "test-integration-aggregator")
 	defer os.RemoveAll(aggregatorCertDir)
-	proxyClientKey, err := pkiutil.NewPrivateKey()
+	proxyClientKey, err := cert.NewPrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxyClientCert, err := pkiutil.NewSignedCert(
-		&cert.Config{
+	proxyClientCert, err := cert.NewSignedCert(
+		cert.Config{
 			CommonName: "kube-aggregator",
 			Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		},
@@ -249,14 +247,10 @@ func TestAggregatedAPIServer(t *testing.T) {
 	)
 	proxyClientCertFile, _ := ioutil.TempFile(aggregatorCertDir, "proxy-client.crt")
 	proxyClientKeyFile, _ := ioutil.TempFile(aggregatorCertDir, "proxy-client.key")
-	if err := ioutil.WriteFile(proxyClientCertFile.Name(), pkiutil.EncodeCertPEM(proxyClientCert), 0600); err != nil {
+	if err := ioutil.WriteFile(proxyClientCertFile.Name(), cert.EncodeCertPEM(proxyClientCert), 0600); err != nil {
 		t.Fatal(err)
 	}
-	proxyClientKeyPEM, err := keyutil.MarshalPrivateKeyToPEM(proxyClientKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ioutil.WriteFile(proxyClientKeyFile.Name(), proxyClientKeyPEM, 0644); err != nil {
+	if err := ioutil.WriteFile(proxyClientKeyFile.Name(), cert.EncodePrivateKeyPEM(proxyClientKey), 0644); err != nil {
 		t.Fatal(err)
 	}
 	aggregatorPort := new(int32)

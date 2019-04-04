@@ -20,6 +20,9 @@ package options
 // This should probably be part of some configuration fed into the build for a
 // given binary target.
 import (
+	// Cloud providers
+	_ "k8s.io/kubernetes/pkg/cloudprovider/providers"
+
 	// Admission policies
 	"k8s.io/kubernetes/plugin/pkg/admission/admit"
 	"k8s.io/kubernetes/plugin/pkg/admission/alwayspullimages"
@@ -35,7 +38,6 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/admission/namespace/autoprovision"
 	"k8s.io/kubernetes/plugin/pkg/admission/namespace/exists"
 	"k8s.io/kubernetes/plugin/pkg/admission/noderestriction"
-	"k8s.io/kubernetes/plugin/pkg/admission/nodetaint"
 	"k8s.io/kubernetes/plugin/pkg/admission/podnodeselector"
 	"k8s.io/kubernetes/plugin/pkg/admission/podpreset"
 	"k8s.io/kubernetes/plugin/pkg/admission/podtolerationrestriction"
@@ -51,6 +53,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/apiserver/pkg/admission/plugin/initialization"
 	"k8s.io/apiserver/pkg/admission/plugin/namespace/lifecycle"
 	mutatingwebhook "k8s.io/apiserver/pkg/admission/plugin/webhook/mutating"
 	validatingwebhook "k8s.io/apiserver/pkg/admission/plugin/webhook/validating"
@@ -70,7 +73,6 @@ var AllOrderedPlugins = []string{
 	limitranger.PluginName,                  // LimitRanger
 	serviceaccount.PluginName,               // ServiceAccount
 	noderestriction.PluginName,              // NodeRestriction
-	nodetaint.PluginName,                    // TaintNodesByCondition
 	alwayspullimages.PluginName,             // AlwaysPullImages
 	imagepolicy.PluginName,                  // ImagePolicyWebhook
 	podsecuritypolicy.PluginName,            // PodSecurityPolicy
@@ -88,6 +90,7 @@ var AllOrderedPlugins = []string{
 	gc.PluginName,                           // OwnerReferencesPermissionEnforcement
 	resize.PluginName,                       // PersistentVolumeClaimResize
 	mutatingwebhook.PluginName,              // MutatingAdmissionWebhook
+	initialization.PluginName,               // Initializers
 	validatingwebhook.PluginName,            // ValidatingAdmissionWebhook
 	resourcequota.PluginName,                // ResourceQuota
 	deny.PluginName,                         // AlwaysDeny
@@ -110,8 +113,7 @@ func RegisterAllAdmissionPlugins(plugins *admission.Plugins) {
 	autoprovision.Register(plugins)
 	exists.Register(plugins)
 	noderestriction.Register(plugins)
-	nodetaint.Register(plugins)
-	label.Register(plugins) // DEPRECATED, future PVs should not rely on labels for zone topology
+	label.Register(plugins) // DEPRECATED in favor of NewPersistentVolumeLabelController in CCM
 	podnodeselector.Register(plugins)
 	podpreset.Register(plugins)
 	podtolerationrestriction.Register(plugins)
@@ -141,10 +143,6 @@ func DefaultOffAdmissionPlugins() sets.String {
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.PodPriority) {
 		defaultOnPlugins.Insert(podpriority.PluginName) //PodPriority
-	}
-
-	if utilfeature.DefaultFeatureGate.Enabled(features.TaintNodesByCondition) {
-		defaultOnPlugins.Insert(nodetaint.PluginName) //TaintNodesByCondition
 	}
 
 	return sets.NewString(AllOrderedPlugins...).Difference(defaultOnPlugins)

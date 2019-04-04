@@ -237,7 +237,7 @@ func TestTaint(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
 			oldNode, expectNewNode := generateNodeAndTaintedNode(test.oldTaints, test.newTaints)
-			newNode := &corev1.Node{}
+			new_node := &corev1.Node{}
 			tainted := false
 			tf := cmdtesting.NewTestFactory()
 			defer tf.Cleanup()
@@ -274,13 +274,13 @@ func TestTaint(t *testing.T) {
 						}
 
 						// decode the patch
-						if err := runtime.DecodeInto(codec, appliedPatch, newNode); err != nil {
+						if err := runtime.DecodeInto(codec, appliedPatch, new_node); err != nil {
 							t.Fatalf("%s: unexpected error: %v", test.description, err)
 						}
-						if !equalTaints(expectNewNode.Spec.Taints, newNode.Spec.Taints) {
-							t.Fatalf("%s: expected:\n%v\nsaw:\n%v\n", test.description, expectNewNode.Spec.Taints, newNode.Spec.Taints)
+						if !equalTaints(expectNewNode.Spec.Taints, new_node.Spec.Taints) {
+							t.Fatalf("%s: expected:\n%v\nsaw:\n%v\n", test.description, expectNewNode.Spec.Taints, new_node.Spec.Taints)
 						}
-						return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, newNode)}, nil
+						return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, new_node)}, nil
 					case m.isFor("PUT", "/nodes/node-name"):
 						tainted = true
 						data, err := ioutil.ReadAll(req.Body)
@@ -288,13 +288,13 @@ func TestTaint(t *testing.T) {
 							t.Fatalf("%s: unexpected error: %v", test.description, err)
 						}
 						defer req.Body.Close()
-						if err := runtime.DecodeInto(codec, data, newNode); err != nil {
+						if err := runtime.DecodeInto(codec, data, new_node); err != nil {
 							t.Fatalf("%s: unexpected error: %v", test.description, err)
 						}
-						if !equalTaints(expectNewNode.Spec.Taints, newNode.Spec.Taints) {
-							t.Fatalf("%s: expected:\n%v\nsaw:\n%v\n", test.description, expectNewNode.Spec.Taints, newNode.Spec.Taints)
+						if !equalTaints(expectNewNode.Spec.Taints, new_node.Spec.Taints) {
+							t.Fatalf("%s: expected:\n%v\nsaw:\n%v\n", test.description, expectNewNode.Spec.Taints, new_node.Spec.Taints)
 						}
-						return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, newNode)}, nil
+						return &http.Response{StatusCode: 200, Header: cmdtesting.DefaultHeader(), Body: cmdtesting.ObjBody(codec, new_node)}, nil
 					default:
 						t.Fatalf("%s: unexpected request: %v %#v\n%#v", test.description, req.Method, req.URL, req)
 						return nil, nil
@@ -305,7 +305,7 @@ func TestTaint(t *testing.T) {
 
 			cmd := NewCmdTaint(tf, genericclioptions.NewTestIOStreamsDiscard())
 
-			sawFatal := false
+			saw_fatal := false
 			func() {
 				defer func() {
 					// Recover from the panic below.
@@ -316,13 +316,13 @@ func TestTaint(t *testing.T) {
 					// Restore cmdutil behavior
 					cmdutil.DefaultBehaviorOnFatal()
 				}()
-				cmdutil.BehaviorOnFatal(func(e string, code int) { sawFatal = true; panic(e) })
+				cmdutil.BehaviorOnFatal(func(e string, code int) { saw_fatal = true; panic(e) })
 				cmd.SetArgs(test.args)
 				cmd.Execute()
 			}()
 
 			if test.expectFatal {
-				if !sawFatal {
+				if !saw_fatal {
 					t.Fatalf("%s: unexpected non-error", test.description)
 				}
 			}

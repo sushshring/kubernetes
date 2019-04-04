@@ -17,14 +17,12 @@ limitations under the License.
 package constants
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/pkg/errors"
-
 	"k8s.io/apimachinery/pkg/util/version"
-	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 )
 
 func TestGetStaticPodDirectory(t *testing.T) {
@@ -100,16 +98,14 @@ func TestGetStaticPodFilepath(t *testing.T) {
 		},
 	}
 	for _, rt := range tests {
-		t.Run(rt.componentName, func(t *testing.T) {
-			actual := GetStaticPodFilepath(rt.componentName, rt.manifestsDir)
-			if actual != rt.expected {
-				t.Errorf(
-					"failed GetStaticPodFilepath:\n\texpected: %s\n\t  actual: %s",
-					rt.expected,
-					actual,
-				)
-			}
-		})
+		actual := GetStaticPodFilepath(rt.componentName, rt.manifestsDir)
+		if actual != rt.expected {
+			t.Errorf(
+				"failed GetStaticPodFilepath:\n\texpected: %s\n\t  actual: %s",
+				rt.expected,
+				actual,
+			)
+		}
 	}
 }
 
@@ -135,16 +131,14 @@ func TestAddSelfHostedPrefix(t *testing.T) {
 		},
 	}
 	for _, rt := range tests {
-		t.Run(rt.componentName, func(t *testing.T) {
-			actual := AddSelfHostedPrefix(rt.componentName)
-			if actual != rt.expected {
-				t.Errorf(
-					"failed AddSelfHostedPrefix:\n\texpected: %s\n\t  actual: %s",
-					rt.expected,
-					actual,
-				)
-			}
-		})
+		actual := AddSelfHostedPrefix(rt.componentName)
+		if actual != rt.expected {
+			t.Errorf(
+				"failed AddSelfHostedPrefix:\n\texpected: %s\n\t  actual: %s",
+				rt.expected,
+				actual,
+			)
+		}
 	}
 }
 
@@ -157,76 +151,77 @@ func TestEtcdSupportedVersion(t *testing.T) {
 		{
 			kubernetesVersion: "1.99.0",
 			expectedVersion:   nil,
-			expectedError:     errors.New("Unsupported or unknown Kubernetes version(1.99.0)"),
+			expectedError:     fmt.Errorf("Unsupported or unknown kubernetes version(1.99.0)"),
+		},
+		{
+			kubernetesVersion: "1.10.0",
+			expectedVersion:   version.MustParseSemantic("3.1.12"),
+			expectedError:     nil,
+		},
+		{
+			kubernetesVersion: "1.10.2",
+			expectedVersion:   version.MustParseSemantic("3.1.12"),
+			expectedError:     nil,
+		},
+		{
+			kubernetesVersion: "1.11.0",
+			expectedVersion:   version.MustParseSemantic("3.2.18"),
+			expectedError:     nil,
 		},
 		{
 			kubernetesVersion: "1.12.1",
 			expectedVersion:   version.MustParseSemantic("3.2.24"),
 			expectedError:     nil,
 		},
-		{
-			kubernetesVersion: "1.13.1",
-			expectedVersion:   version.MustParseSemantic("3.2.24"),
-			expectedError:     nil,
-		},
-		{
-			kubernetesVersion: "1.14.0",
-			expectedVersion:   version.MustParseSemantic("3.3.10"),
-			expectedError:     nil,
-		},
 	}
 	for _, rt := range tests {
-		t.Run(rt.kubernetesVersion, func(t *testing.T) {
-			actualVersion, actualError := EtcdSupportedVersion(rt.kubernetesVersion)
-			if actualError != nil {
-				if rt.expectedError == nil {
-					t.Errorf("failed EtcdSupportedVersion:\n\texpected no error, but got: %v", actualError)
-				} else if actualError.Error() != rt.expectedError.Error() {
-					t.Errorf(
-						"failed EtcdSupportedVersion:\n\texpected error: %v\n\t  actual error: %v",
-						rt.expectedError,
-						actualError,
-					)
-				}
-			} else {
-				if rt.expectedError != nil {
-					t.Errorf("failed EtcdSupportedVersion:\n\texpected error: %v, but got no error", rt.expectedError)
-				} else if strings.Compare(actualVersion.String(), rt.expectedVersion.String()) != 0 {
-					t.Errorf(
-						"failed EtcdSupportedVersion:\n\texpected version: %s\n\t  actual version: %s",
-						rt.expectedVersion.String(),
-						actualVersion.String(),
-					)
-				}
+		actualVersion, actualError := EtcdSupportedVersion(rt.kubernetesVersion)
+		if actualError != nil {
+			if rt.expectedError == nil {
+				t.Errorf("failed EtcdSupportedVersion:\n\texpected no error, but got: %v", actualError)
+			} else if actualError.Error() != rt.expectedError.Error() {
+				t.Errorf(
+					"failed EtcdSupportedVersion:\n\texpected error: %v\n\t  actual error: %v",
+					rt.expectedError,
+					actualError,
+				)
 			}
-		})
+		} else {
+			if rt.expectedError != nil {
+				t.Errorf("failed EtcdSupportedVersion:\n\texpected error: %v, but got no error", rt.expectedError)
+			} else if strings.Compare(actualVersion.String(), rt.expectedVersion.String()) != 0 {
+				t.Errorf(
+					"failed EtcdSupportedVersion:\n\texpected version: %s\n\t  actual version: %s",
+					rt.expectedVersion.String(),
+					actualVersion.String(),
+				)
+			}
+		}
 	}
 }
 
 func TestGetKubeDNSVersion(t *testing.T) {
 	var tests = []struct {
-		dns      kubeadmapi.DNSAddOnType
+		dns      string
 		expected string
 	}{
 		{
-			dns:      kubeadmapi.KubeDNS,
+			dns:      KubeDNS,
 			expected: KubeDNSVersion,
 		},
 		{
-			dns:      kubeadmapi.CoreDNS,
+			dns:      CoreDNS,
 			expected: CoreDNSVersion,
 		},
 	}
 	for _, rt := range tests {
-		t.Run(string(rt.dns), func(t *testing.T) {
-			actualDNSVersion := GetDNSVersion(rt.dns)
-			if actualDNSVersion != rt.expected {
-				t.Errorf(
-					"failed GetDNSVersion:\n\texpected: %s\n\t  actual: %s",
-					rt.expected,
-					actualDNSVersion,
-				)
-			}
-		})
+		actualDNSVersion := GetDNSVersion(rt.dns)
+		if actualDNSVersion != rt.expected {
+			t.Errorf(
+				"failed GetDNSVersion:\n\texpected: %s\n\t  actual: %s",
+				rt.expected,
+				actualDNSVersion,
+			)
+		}
 	}
 }
