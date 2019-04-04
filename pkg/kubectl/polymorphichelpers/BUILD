@@ -4,7 +4,6 @@ go_library(
     name = "go_default_library",
     srcs = [
         "attachablepodforobject.go",
-        "canbeautoscaled.go",
         "canbeexposed.go",
         "helpers.go",
         "historyviewer.go",
@@ -23,6 +22,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pkg/kubectl:go_default_library",
+        "//pkg/kubectl/generate:go_default_library",
         "//pkg/kubectl/scheme:go_default_library",
         "//pkg/kubectl/util/podutils:go_default_library",
         "//staging/src/k8s.io/api/apps/v1:go_default_library",
@@ -50,7 +50,6 @@ go_library(
 go_test(
     name = "go_default_test",
     srcs = [
-        "canbeautoscaled_test.go",
         "canbeexposed_test.go",
         "helpers_test.go",
         "logsforobject_test.go",

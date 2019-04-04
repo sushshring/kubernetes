@@ -37,19 +37,18 @@ import (
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/discovery"
-	cacheddiscovery "k8s.io/client-go/discovery/cached"
+	cacheddiscovery "k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	scaleclient "k8s.io/client-go/scale"
 	"k8s.io/client-go/transport"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/extensions"
-	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 	"k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/kubernetes/test/e2e/framework/timer"
 	testutils "k8s.io/kubernetes/test/utils"
@@ -232,6 +231,8 @@ var _ = SIGDescribe("Load capacity", func() {
 				framework.ExpectNoError(CreateQuotas(f, namespaces, 2*totalPods, testPhaseDurations.StartPhase(115, "quota creation")))
 			}
 
+			f.AddonResourceConstraints = loadResourceConstraints()
+
 			serviceCreationPhase := testPhaseDurations.StartPhase(120, "services creation")
 			defer serviceCreationPhase.End()
 			if itArg.services {
@@ -339,9 +340,8 @@ var _ = SIGDescribe("Load capacity", func() {
 	}
 })
 
-func createClients(numberOfClients int) ([]clientset.Interface, []internalclientset.Interface, []scaleclient.ScalesGetter, error) {
+func createClients(numberOfClients int) ([]clientset.Interface, []scaleclient.ScalesGetter, error) {
 	clients := make([]clientset.Interface, numberOfClients)
-	internalClients := make([]internalclientset.Interface, numberOfClients)
 	scalesClients := make([]scaleclient.ScalesGetter, numberOfClients)
 
 	for i := 0; i < numberOfClients; i++ {
@@ -359,11 +359,11 @@ func createClients(numberOfClients int) ([]clientset.Interface, []internalclient
 		// each client here.
 		transportConfig, err := config.TransportConfig()
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		tlsConfig, err := transport.TLSConfigFor(transportConfig)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		config.Transport = utilnet.SetTransportDefaults(&http.Transport{
 			Proxy:               http.ProxyFromEnvironment,
@@ -375,20 +375,19 @@ func createClients(numberOfClients int) ([]clientset.Interface, []internalclient
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
 		})
+		config.WrapTransport = transportConfig.WrapTransport
+		config.Dial = transportConfig.Dial
 		// Overwrite TLS-related fields from config to avoid collision with
 		// Transport field.
 		config.TLSClientConfig = restclient.TLSClientConfig{}
+		config.AuthProvider = nil
+		config.ExecProvider = nil
 
 		c, err := clientset.NewForConfig(config)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		clients[i] = c
-		internalClient, err := internalclientset.NewForConfig(config)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		internalClients[i] = internalClient
 
 		// create scale client, if GroupVersion or NegotiatedSerializer are not set
 		// assign default values - these fields are mandatory (required by RESTClientFor).
@@ -396,15 +395,15 @@ func createClients(numberOfClients int) ([]clientset.Interface, []internalclient
 			config.GroupVersion = &schema.GroupVersion{}
 		}
 		if config.NegotiatedSerializer == nil {
-			config.NegotiatedSerializer = legacyscheme.Codecs
+			config.NegotiatedSerializer = scheme.Codecs
 		}
 		restClient, err := restclient.RESTClientFor(config)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		discoClient, err := discovery.NewDiscoveryClientForConfig(config)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		cachedDiscoClient := cacheddiscovery.NewMemCacheClient(discoClient)
 		restMapper := restmapper.NewDeferredDiscoveryRESTMapper(cachedDiscoClient)
@@ -412,7 +411,7 @@ func createClients(numberOfClients int) ([]clientset.Interface, []internalclient
 		resolver := scaleclient.NewDiscoveryScaleKindResolver(cachedDiscoClient)
 		scalesClients[i] = scaleclient.New(restClient, restMapper, dynamic.LegacyAPIPathResolverFunc, resolver)
 	}
-	return clients, internalClients, scalesClients, nil
+	return clients, scalesClients, nil
 }
 
 func computePodCounts(total int) (int, int, int) {
@@ -427,6 +426,19 @@ func computePodCounts(total int) (int, int, int) {
 	total -= mediumGroupCount * mediumGroupSize
 	smallGroupCount := total / smallGroupSize
 	return smallGroupCount, mediumGroupCount, bigGroupCount
+}
+
+func loadResourceConstraints() map[string]framework.ResourceConstraint {
+	constraints := make(map[string]framework.ResourceConstraint)
+	constraints["coredns"] = framework.ResourceConstraint{
+		CPUConstraint:    framework.NoCPUConstraint,
+		MemoryConstraint: 170 * (1024 * 1024),
+	}
+	constraints["kubedns"] = framework.ResourceConstraint{
+		CPUConstraint:    framework.NoCPUConstraint,
+		MemoryConstraint: 170 * (1024 * 1024),
+	}
+	return constraints
 }
 
 func generateConfigs(
@@ -459,12 +471,11 @@ func generateConfigs(
 	// Create a number of clients to better simulate real usecase
 	// where not everyone is using exactly the same client.
 	rcsPerClient := 20
-	clients, internalClients, scalesClients, err := createClients((len(configs) + rcsPerClient - 1) / rcsPerClient)
+	clients, scalesClients, err := createClients((len(configs) + rcsPerClient - 1) / rcsPerClient)
 	framework.ExpectNoError(err)
 
 	for i := 0; i < len(configs); i++ {
 		configs[i].SetClient(clients[i%len(clients)])
-		configs[i].SetInternalClient(internalClients[i%len(internalClients)])
 		configs[i].SetScalesClient(scalesClients[i%len(clients)])
 	}
 	for i := 0; i < len(secretConfigs); i++ {
@@ -523,10 +534,9 @@ func GenerateConfigsForGroup(
 
 		baseConfig := &testutils.RCConfig{
 			Client:         nil, // this will be overwritten later
-			InternalClient: nil, // this will be overwritten later
 			Name:           groupName + "-" + strconv.Itoa(i),
 			Namespace:      namespace,
-			Timeout:        10 * time.Minute,
+			Timeout:        UnreadyNodeToleration,
 			Image:          image,
 			Command:        command,
 			Replicas:       size,
@@ -536,6 +546,19 @@ func GenerateConfigsForGroup(
 			ConfigMapNames: configMapNames,
 			// Define a label to group every 2 RCs into one service.
 			Labels: map[string]string{svcLabelKey: groupName + "-" + strconv.Itoa((i+1)/2)},
+			Tolerations: []v1.Toleration{
+				{
+					Key:               "node.kubernetes.io/not-ready",
+					Operator:          v1.TolerationOpExists,
+					Effect:            v1.TaintEffectNoExecute,
+					TolerationSeconds: func(i int64) *int64 { return &i }(int64(UnreadyNodeToleration / time.Second)),
+				}, {
+					Key:               "node.kubernetes.io/unreachable",
+					Operator:          v1.TolerationOpExists,
+					Effect:            v1.TaintEffectNoExecute,
+					TolerationSeconds: func(i int64) *int64 { return &i }(int64(UnreadyNodeToleration / time.Second)),
+				},
+			},
 		}
 
 		if kind == randomKind {

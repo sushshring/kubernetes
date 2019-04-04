@@ -23,6 +23,7 @@ import (
 	"k8s.io/api/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/storage/testsuites"
 	"k8s.io/kubernetes/test/e2e/storage/utils"
 )
 
@@ -85,20 +86,20 @@ var _ = utils.SIGDescribe("GenericPersistentVolume[Disruptive]", func() {
 
 func createPodPVCFromSC(f *framework.Framework, c clientset.Interface, ns string) (*v1.Pod, *v1.PersistentVolumeClaim, *v1.PersistentVolume) {
 	var err error
-	test := storageClassTest{
-		name:      "default",
-		claimSize: "2Gi",
+	test := testsuites.StorageClassTest{
+		Name:      "default",
+		ClaimSize: "2Gi",
 	}
 	pvc := newClaim(test, ns, "default")
 	pvc, err = c.CoreV1().PersistentVolumeClaims(pvc.Namespace).Create(pvc)
-	Expect(err).NotTo(HaveOccurred(), "Error creating pvc")
+	framework.ExpectNoError(err, "Error creating pvc")
 	pvcClaims := []*v1.PersistentVolumeClaim{pvc}
 	pvs, err := framework.WaitForPVClaimBoundPhase(c, pvcClaims, framework.ClaimProvisionTimeout)
-	Expect(err).NotTo(HaveOccurred(), "Failed waiting for PVC to be bound %v", err)
+	framework.ExpectNoError(err, "Failed waiting for PVC to be bound %v", err)
 	Expect(len(pvs)).To(Equal(1))
 
 	By("Creating a pod with dynamically provisioned volume")
 	pod, err := framework.CreateNginxPod(c, ns, nil, pvcClaims)
-	Expect(err).NotTo(HaveOccurred(), "While creating pods for kubelet restart test")
+	framework.ExpectNoError(err, "While creating pods for kubelet restart test")
 	return pod, pvc, pvs[0]
 }

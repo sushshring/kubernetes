@@ -17,10 +17,11 @@ limitations under the License.
 package aws
 
 import (
-	"github.com/golang/glog"
-	"k8s.io/apimachinery/pkg/util/sets"
-	awscredentialprovider "k8s.io/kubernetes/pkg/credentialprovider/aws"
 	"sync"
+
+	"k8s.io/klog"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // wellKnownRegions is the complete list of regions known to the AWS cloudprovider
@@ -29,6 +30,7 @@ var wellKnownRegions = [...]string{
 	// from `aws ec2 describe-regions --region us-east-1 --query Regions[].RegionName | sort`
 	"ap-northeast-1",
 	"ap-northeast-2",
+	"ap-northeast-3",
 	"ap-south-1",
 	"ap-southeast-1",
 	"ap-southeast-2",
@@ -36,6 +38,7 @@ var wellKnownRegions = [...]string{
 	"eu-central-1",
 	"eu-west-1",
 	"eu-west-2",
+	"eu-west-3",
 	"sa-east-1",
 	"us-east-1",
 	"us-east-2",
@@ -44,6 +47,7 @@ var wellKnownRegions = [...]string{
 
 	// these are not registered in many / most accounts
 	"cn-north-1",
+	"cn-northwest-1",
 	"us-gov-west-1",
 }
 
@@ -67,13 +71,11 @@ func recognizeRegion(region string) {
 	}
 
 	if awsRegions.Has(region) {
-		glog.V(6).Infof("found AWS region %q again - ignoring", region)
+		klog.V(6).Infof("found AWS region %q again - ignoring", region)
 		return
 	}
 
-	glog.V(4).Infof("found AWS region %q", region)
-
-	awscredentialprovider.RegisterCredentialsProvider(region)
+	klog.V(4).Infof("found AWS region %q", region)
 
 	awsRegions.Insert(region)
 }

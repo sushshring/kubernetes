@@ -20,10 +20,11 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	policy "k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	api "k8s.io/kubernetes/pkg/apis/core"
-	"k8s.io/kubernetes/pkg/apis/policy"
 	"k8s.io/kubernetes/pkg/features"
 	psputil "k8s.io/kubernetes/pkg/security/podsecuritypolicy/util"
 	"k8s.io/kubernetes/pkg/securitycontext"
@@ -58,10 +59,10 @@ func NewSimpleProvider(psp *policy.PodSecurityPolicy, namespace string, strategy
 	}, nil
 }
 
-// DefaultPodSecurityContext sets the default values of the required but not filled fields.
-// It modifies the SecurityContext and annotations of the provided pod. Validation should be
-// used after the context is defaulted to ensure it complies with the required restrictions.
-func (s *simpleProvider) DefaultPodSecurityContext(pod *api.Pod) error {
+// MutatePod sets the default values of the required but not filled fields.
+// Validation should be used after the context is defaulted to ensure it
+// complies with the required restrictions.
+func (s *simpleProvider) MutatePod(pod *api.Pod) error {
 	sc := securitycontext.NewPodSecurityContextMutator(pod.Spec.SecurityContext)
 
 	if sc.SupplementalGroups() == nil {
@@ -103,13 +104,25 @@ func (s *simpleProvider) DefaultPodSecurityContext(pod *api.Pod) error {
 
 	pod.Spec.SecurityContext = sc.PodSecurityContext()
 
+	for i := range pod.Spec.InitContainers {
+		if err := s.mutateContainer(pod, &pod.Spec.InitContainers[i]); err != nil {
+			return err
+		}
+	}
+
+	for i := range pod.Spec.Containers {
+		if err := s.mutateContainer(pod, &pod.Spec.Containers[i]); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-// DefaultContainerSecurityContext sets the default values of the required but not filled fields.
+// mutateContainer sets the default values of the required but not filled fields.
 // It modifies the SecurityContext of the container and annotations of the pod. Validation should
 // be used after the context is defaulted to ensure it complies with the required restrictions.
-func (s *simpleProvider) DefaultContainerSecurityContext(pod *api.Pod, container *api.Container) error {
+func (s *simpleProvider) mutateContainer(pod *api.Pod, container *api.Container) error {
 	sc := securitycontext.NewEffectiveContainerSecurityContextMutator(
 		securitycontext.NewPodSecurityContextAccessor(pod.Spec.SecurityContext),
 		securitycontext.NewContainerSecurityContextMutator(container.SecurityContext),
@@ -174,9 +187,9 @@ func (s *simpleProvider) DefaultContainerSecurityContext(pod *api.Pod, container
 		sc.SetAllowPrivilegeEscalation(s.psp.Spec.DefaultAllowPrivilegeEscalation)
 	}
 
-	// if the PSP sets psp.AllowPrivilegeEscalation to false set that as the default
-	if !s.psp.Spec.AllowPrivilegeEscalation && sc.AllowPrivilegeEscalation() == nil {
-		sc.SetAllowPrivilegeEscalation(&s.psp.Spec.AllowPrivilegeEscalation)
+	// if the PSP sets psp.AllowPrivilegeEscalation to false, set that as the default
+	if !*s.psp.Spec.AllowPrivilegeEscalation && sc.AllowPrivilegeEscalation() == nil {
+		sc.SetAllowPrivilegeEscalation(s.psp.Spec.AllowPrivilegeEscalation)
 	}
 
 	pod.Annotations = annotations
@@ -281,11 +294,22 @@ func (s *simpleProvider) ValidatePod(pod *api.Pod) field.ErrorList {
 			}
 		}
 	}
+
+	fldPath := field.NewPath("spec", "initContainers")
+	for i := range pod.Spec.InitContainers {
+		allErrs = append(allErrs, s.validateContainer(pod, &pod.Spec.InitContainers[i], fldPath.Index(i))...)
+	}
+
+	fldPath = field.NewPath("spec", "containers")
+	for i := range pod.Spec.Containers {
+		allErrs = append(allErrs, s.validateContainer(pod, &pod.Spec.Containers[i], fldPath.Index(i))...)
+	}
+
 	return allErrs
 }
 
 // Ensure a container's SecurityContext is in compliance with the given constraints
-func (s *simpleProvider) ValidateContainer(pod *api.Pod, container *api.Container, containerPath *field.Path) field.ErrorList {
+func (s *simpleProvider) validateContainer(pod *api.Pod, container *api.Container, containerPath *field.Path) field.ErrorList {
 	allErrs := field.ErrorList{}
 
 	podSC := securitycontext.NewPodSecurityContextAccessor(pod.Spec.SecurityContext)
@@ -313,14 +337,15 @@ func (s *simpleProvider) ValidateContainer(pod *api.Pod, container *api.Containe
 	procMount := sc.ProcMount()
 	allowedProcMounts := s.psp.Spec.AllowedProcMountTypes
 	if len(allowedProcMounts) == 0 {
-		allowedProcMounts = []api.ProcMountType{api.DefaultProcMount}
+		allowedProcMounts = []corev1.ProcMountType{corev1.DefaultProcMount}
 	}
 	foundProcMountType := false
 	for _, pm := range allowedProcMounts {
-		if pm == procMount {
+		if string(pm) == string(procMount) {
 			foundProcMountType = true
 		}
 	}
+
 	if !foundProcMountType {
 		allErrs = append(allErrs, field.Invalid(scPath.Child("procMount"), procMount, "ProcMountType is not allowed"))
 	}
@@ -339,12 +364,8 @@ func (s *simpleProvider) ValidateContainer(pod *api.Pod, container *api.Containe
 	}
 
 	allowEscalation := sc.AllowPrivilegeEscalation()
-	if !s.psp.Spec.AllowPrivilegeEscalation && allowEscalation == nil {
+	if !*s.psp.Spec.AllowPrivilegeEscalation && (allowEscalation == nil || *allowEscalation) {
 		allErrs = append(allErrs, field.Invalid(scPath.Child("allowPrivilegeEscalation"), allowEscalation, "Allowing privilege escalation for containers is not allowed"))
-	}
-
-	if !s.psp.Spec.AllowPrivilegeEscalation && allowEscalation != nil && *allowEscalation {
-		allErrs = append(allErrs, field.Invalid(scPath.Child("allowPrivilegeEscalation"), *allowEscalation, "Allowing privilege escalation for containers is not allowed"))
 	}
 
 	return allErrs

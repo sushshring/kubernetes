@@ -27,9 +27,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	utilfeaturetesting "k8s.io/apiserver/pkg/util/feature/testing"
+	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtimetesting "k8s.io/cri-api/pkg/apis/testing"
 	"k8s.io/kubernetes/pkg/features"
-	runtimeapi "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
-	runtimetesting "k8s.io/kubernetes/pkg/kubelet/apis/cri/testing"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 )
 
@@ -351,8 +351,7 @@ func TestNamespacesForPod(t *testing.T) {
 		assert.Equal(t, test.expected, actual)
 	}
 
-	// Test ShareProcessNamespace feature disabled, feature gate restored by previous defer
-	utilfeaturetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.PodShareProcessNamespace, false)
+	defer utilfeaturetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.PodShareProcessNamespace, false)()
 
 	for desc, test := range map[string]struct {
 		input    *v1.Pod

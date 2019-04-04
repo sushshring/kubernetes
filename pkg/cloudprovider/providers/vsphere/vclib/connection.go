@@ -25,12 +25,12 @@ import (
 	neturl "net/url"
 	"sync"
 
-	"github.com/golang/glog"
 	"github.com/vmware/govmomi/session"
 	"github.com/vmware/govmomi/sts"
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/soap"
-	"k8s.io/kubernetes/pkg/version"
+	"k8s.io/client-go/pkg/version"
+	"k8s.io/klog"
 )
 
 // VSphereConnection contains information for connecting to vCenter
@@ -62,7 +62,7 @@ func (connection *VSphereConnection) Connect(ctx context.Context) error {
 	if connection.Client == nil {
 		connection.Client, err = connection.NewClient(ctx)
 		if err != nil {
-			glog.Errorf("Failed to create govmomi client. err: %+v", err)
+			klog.Errorf("Failed to create govmomi client. err: %+v", err)
 			return err
 		}
 		return nil
@@ -70,20 +70,56 @@ func (connection *VSphereConnection) Connect(ctx context.Context) error {
 	m := session.NewManager(connection.Client)
 	userSession, err := m.UserSession(ctx)
 	if err != nil {
-		glog.Errorf("Error while obtaining user session. err: %+v", err)
+		klog.Errorf("Error while obtaining user session. err: %+v", err)
 		return err
 	}
 	if userSession != nil {
 		return nil
 	}
-	glog.Warningf("Creating new client session since the existing session is not valid or not authenticated")
+	klog.Warningf("Creating new client session since the existing session is not valid or not authenticated")
 
 	connection.Client, err = connection.NewClient(ctx)
 	if err != nil {
-		glog.Errorf("Failed to create govmomi client. err: %+v", err)
+		klog.Errorf("Failed to create govmomi client. err: %+v", err)
 		return err
 	}
 	return nil
+}
+
+// Signer returns an sts.Signer for use with SAML token auth if connection is configured for such.
+// Returns nil if username/password auth is configured for the connection.
+func (connection *VSphereConnection) Signer(ctx context.Context, client *vim25.Client) (*sts.Signer, error) {
+	// TODO: Add separate fields for certificate and private-key.
+	// For now we can leave the config structs and validation as-is and
+	// decide to use LoginByToken if the username value is PEM encoded.
+	b, _ := pem.Decode([]byte(connection.Username))
+	if b == nil {
+		return nil, nil
+	}
+
+	cert, err := tls.X509KeyPair([]byte(connection.Username), []byte(connection.Password))
+	if err != nil {
+		klog.Errorf("Failed to load X509 key pair. err: %+v", err)
+		return nil, err
+	}
+
+	tokens, err := sts.NewClient(ctx, client)
+	if err != nil {
+		klog.Errorf("Failed to create STS client. err: %+v", err)
+		return nil, err
+	}
+
+	req := sts.TokenRequest{
+		Certificate: &cert,
+	}
+
+	signer, err := tokens.Issue(ctx, req)
+	if err != nil {
+		klog.Errorf("Failed to issue SAML token. err: %+v", err)
+		return nil, err
+	}
+
+	return signer, nil
 }
 
 // login calls SessionManager.LoginByToken if certificate and private key are configured,
@@ -93,38 +129,17 @@ func (connection *VSphereConnection) login(ctx context.Context, client *vim25.Cl
 	connection.credentialsLock.Lock()
 	defer connection.credentialsLock.Unlock()
 
-	// TODO: Add separate fields for certificate and private-key.
-	// For now we can leave the config structs and validation as-is and
-	// decide to use LoginByToken if the username value is PEM encoded.
-	b, _ := pem.Decode([]byte(connection.Username))
-	if b == nil {
-		glog.V(3).Infof("SessionManager.Login with username '%s'", connection.Username)
+	signer, err := connection.Signer(ctx, client)
+	if err != nil {
+		return err
+	}
+
+	if signer == nil {
+		klog.V(3).Infof("SessionManager.Login with username %q", connection.Username)
 		return m.Login(ctx, neturl.UserPassword(connection.Username, connection.Password))
 	}
 
-	glog.V(3).Infof("SessionManager.LoginByToken with certificate '%s'", connection.Username)
-
-	cert, err := tls.X509KeyPair([]byte(connection.Username), []byte(connection.Password))
-	if err != nil {
-		glog.Errorf("Failed to load X509 key pair. err: %+v", err)
-		return err
-	}
-
-	tokens, err := sts.NewClient(ctx, client)
-	if err != nil {
-		glog.Errorf("Failed to create STS client. err: %+v", err)
-		return err
-	}
-
-	req := sts.TokenRequest{
-		Certificate: &cert,
-	}
-
-	signer, err := tokens.Issue(ctx, req)
-	if err != nil {
-		glog.Errorf("Failed to issue SAML token. err: %+v", err)
-		return err
-	}
+	klog.V(3).Infof("SessionManager.LoginByToken with certificate %q", connection.Username)
 
 	header := soap.Header{Security: signer}
 
@@ -144,15 +159,15 @@ func (connection *VSphereConnection) Logout(ctx context.Context) {
 
 	hasActiveSession, err := m.SessionIsActive(ctx)
 	if err != nil {
-		glog.Errorf("Logout failed: %s", err)
+		klog.Errorf("Logout failed: %s", err)
 		return
 	}
 	if !hasActiveSession {
-		glog.Errorf("No active session, cannot logout")
+		klog.Errorf("No active session, cannot logout")
 		return
 	}
 	if err := m.Logout(ctx); err != nil {
-		glog.Errorf("Logout failed: %s", err)
+		klog.Errorf("Logout failed: %s", err)
 	}
 }
 
@@ -160,7 +175,7 @@ func (connection *VSphereConnection) Logout(ctx context.Context) {
 func (connection *VSphereConnection) NewClient(ctx context.Context) (*vim25.Client, error) {
 	url, err := soap.ParseURL(net.JoinHostPort(connection.Hostname, connection.Port))
 	if err != nil {
-		glog.Errorf("Failed to parse URL: %s. err: %+v", url, err)
+		klog.Errorf("Failed to parse URL: %s. err: %+v", url, err)
 		return nil, err
 	}
 
@@ -177,7 +192,7 @@ func (connection *VSphereConnection) NewClient(ctx context.Context) (*vim25.Clie
 
 	client, err := vim25.NewClient(ctx, sc)
 	if err != nil {
-		glog.Errorf("Failed to create new client. err: %+v", err)
+		klog.Errorf("Failed to create new client. err: %+v", err)
 		return nil, err
 	}
 
@@ -188,10 +203,10 @@ func (connection *VSphereConnection) NewClient(ctx context.Context) (*vim25.Clie
 	if err != nil {
 		return nil, err
 	}
-	if glog.V(3) {
+	if klog.V(3) {
 		s, err := session.NewManager(client).UserSession(ctx)
 		if err == nil {
-			glog.Infof("New session ID for '%s' = %s", s.UserName, s.Key)
+			klog.Infof("New session ID for '%s' = %s", s.UserName, s.Key)
 		}
 	}
 

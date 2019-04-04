@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -179,10 +179,9 @@ var _ = utils.SIGDescribe("EmptyDir wrapper volumes", func() {
 	/*
 		Release : v1.13
 		Testname: EmptyDir Wrapper Volume, ConfigMap volumes, no race
-		Description: Slow by design [~180 Seconds].
-		Create 50 ConfigMaps Volumes and 5 replicas of pod with these ConfigMapvolumes mounted. Pod MUST NOT fail waiting for Volumes.
+		Description: Create 50 ConfigMaps Volumes and 5 replicas of pod with these ConfigMapvolumes mounted. Pod MUST NOT fail waiting for Volumes.
 	*/
-	framework.ConformanceIt("should not cause race condition when used for configmaps [Serial] [Slow]", func() {
+	framework.ConformanceIt("should not cause race condition when used for configmaps [Serial]", func() {
 		configMapNames := createConfigmapsForRace(f)
 		defer deleteConfigMaps(f, configMapNames)
 		volumes, volumeMounts := makeConfigMapVolumes(configMapNames)
@@ -311,7 +310,7 @@ func deleteConfigMaps(f *framework.Framework, configMapNames []string) {
 	By("Cleaning up the configMaps")
 	for _, configMapName := range configMapNames {
 		err := f.ClientSet.CoreV1().ConfigMaps(f.Namespace.Name).Delete(configMapName, nil)
-		Expect(err).NotTo(HaveOccurred(), "unable to delete configMap %v", configMapName)
+		framework.ExpectNoError(err, "unable to delete configMap %v", configMapName)
 	}
 }
 
@@ -343,6 +342,8 @@ func makeConfigMapVolumes(configMapNames []string) (volumes []v1.Volume, volumeM
 }
 
 func testNoWrappedVolumeRace(f *framework.Framework, volumes []v1.Volume, volumeMounts []v1.VolumeMount, podCount int32) {
+	const nodeHostnameLabelKey = "kubernetes.io/hostname"
+
 	rcName := wrappedVolumeRaceRCNamePrefix + string(uuid.NewUUID())
 	nodeList := framework.GetReadySchedulableNodesOrDie(f.ClientSet)
 	Expect(len(nodeList.Items)).To(BeNumerically(">", 0))
@@ -356,9 +357,9 @@ func testNoWrappedVolumeRace(f *framework.Framework, volumes []v1.Volume, volume
 					{
 						MatchExpressions: []v1.NodeSelectorRequirement{
 							{
-								Key:      "kubernetes.io/hostname",
+								Key:      nodeHostnameLabelKey,
 								Operator: v1.NodeSelectorOpIn,
-								Values:   []string{targetNode.Name},
+								Values:   []string{targetNode.Labels[nodeHostnameLabelKey]},
 							},
 						},
 					},
@@ -402,7 +403,7 @@ func testNoWrappedVolumeRace(f *framework.Framework, volumes []v1.Volume, volume
 		},
 	}
 	_, err := f.ClientSet.CoreV1().ReplicationControllers(f.Namespace.Name).Create(rc)
-	Expect(err).NotTo(HaveOccurred(), "error creating replication controller")
+	framework.ExpectNoError(err, "error creating replication controller")
 
 	defer func() {
 		err := framework.DeleteRCAndWaitForGC(f.ClientSet, f.Namespace.Name, rcName)
@@ -420,6 +421,6 @@ func testNoWrappedVolumeRace(f *framework.Framework, volumes []v1.Volume, volume
 			continue
 		}
 		err = f.WaitForPodRunning(pod.Name)
-		Expect(err).NotTo(HaveOccurred(), "Failed waiting for pod %s to enter running state", pod.Name)
+		framework.ExpectNoError(err, "Failed waiting for pod %s to enter running state", pod.Name)
 	}
 }

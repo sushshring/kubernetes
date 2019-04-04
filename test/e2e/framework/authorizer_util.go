@@ -17,7 +17,7 @@ limitations under the License.
 package framework
 
 import (
-	"github.com/golang/glog"
+	"k8s.io/klog"
 	"sync"
 	"time"
 
@@ -42,7 +42,7 @@ func WaitForAuthorizationUpdate(c v1beta1authorization.SubjectAccessReviewsGette
 	return WaitForNamedAuthorizationUpdate(c, user, namespace, verb, "", resource, allowed)
 }
 
-// WaitForAuthorizationUpdate checks if the given user can perform the named verb and action on the named resource.
+// WaitForNamedAuthorizationUpdate checks if the given user can perform the named verb and action on the named resource.
 // If policyCachePollTimeout is reached without the expected condition matching, an error is returned
 func WaitForNamedAuthorizationUpdate(c v1beta1authorization.SubjectAccessReviewsGetter, user, namespace, verb, resourceName string, resource schema.GroupResource, allowed bool) error {
 	review := &authorizationv1beta1.SubjectAccessReview{
@@ -62,7 +62,7 @@ func WaitForNamedAuthorizationUpdate(c v1beta1authorization.SubjectAccessReviews
 		// GKE doesn't enable the SAR endpoint.  Without this endpoint, we cannot determine if the policy engine
 		// has adjusted as expected.  In this case, simply wait one second and hope it's up to date
 		if apierrors.IsNotFound(err) {
-			glog.Info("SubjectAccessReview endpoint is missing")
+			klog.Info("SubjectAccessReview endpoint is missing")
 			time.Sleep(1 * time.Second)
 			return true, nil
 		}
@@ -94,7 +94,7 @@ func BindClusterRole(c v1beta1rbac.ClusterRoleBindingsGetter, clusterRole, ns st
 
 	// if we failed, don't fail the entire test because it may still work. RBAC may simply be disabled.
 	if err != nil {
-		glog.Errorf("Error binding clusterrole/%s for %q for %v\n", clusterRole, ns, subjects)
+		klog.Errorf("Error binding clusterrole/%s for %q for %v\n", clusterRole, ns, subjects)
 	}
 }
 
@@ -124,7 +124,7 @@ func bindInNamespace(c v1beta1rbac.RoleBindingsGetter, roleType, role, ns string
 
 	// if we failed, don't fail the entire test because it may still work. RBAC may simply be disabled.
 	if err != nil {
-		glog.Errorf("Error binding %s/%s into %q for %v\n", roleType, role, ns, subjects)
+		klog.Errorf("Error binding %s/%s into %q for %v\n", roleType, role, ns, subjects)
 	}
 }
 
@@ -133,6 +133,7 @@ var (
 	isRBACEnabled     bool
 )
 
+// IsRBACEnabled returns true if RBAC is enabled. Otherwise false.
 func IsRBACEnabled(f *Framework) bool {
 	isRBACEnabledOnce.Do(func() {
 		crs, err := f.ClientSet.RbacV1().ClusterRoles().List(metav1.ListOptions{})

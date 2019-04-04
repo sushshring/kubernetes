@@ -672,7 +672,7 @@ func TestControllerUpdateStatusWithFailure(t *testing.T) {
 	fakeClient.AddReactor("*", "*", func(action core.Action) (bool, runtime.Object, error) {
 		return true, &apps.ReplicaSet{}, fmt.Errorf("Fake error")
 	})
-	fakeRSClient := fakeClient.Apps().ReplicaSets("default")
+	fakeRSClient := fakeClient.AppsV1().ReplicaSets("default")
 	numReplicas := int32(10)
 	newStatus := apps.ReplicaSetStatus{Replicas: numReplicas}
 	updateReplicaSetStatus(fakeRSClient, rs, newStatus)
@@ -1240,10 +1240,8 @@ func TestGetCondition(t *testing.T) {
 	tests := []struct {
 		name string
 
-		status     apps.ReplicaSetStatus
-		condType   apps.ReplicaSetConditionType
-		condStatus v1.ConditionStatus
-		condReason string
+		status   apps.ReplicaSetStatus
+		condType apps.ReplicaSetConditionType
 
 		expected bool
 	}{

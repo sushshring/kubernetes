@@ -106,15 +106,9 @@ func NewCmdTopNode(f cmdutil.Factory, o *TopNodeOptions, streams genericclioptio
 		Long:                  topNodeLong,
 		Example:               topNodeExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := o.Complete(f, cmd, args); err != nil {
-				cmdutil.CheckErr(err)
-			}
-			if err := o.Validate(); err != nil {
-				cmdutil.CheckErr(cmdutil.UsageErrorf(cmd, "%v", err))
-			}
-			if err := o.RunTopNode(); err != nil {
-				cmdutil.CheckErr(err)
-			}
+			cmdutil.CheckErr(o.Complete(f, cmd, args))
+			cmdutil.CheckErr(o.Validate())
+			cmdutil.CheckErr(o.RunTopNode())
 		},
 		Aliases: []string{"nodes", "no"},
 	}
@@ -225,7 +219,7 @@ func (o TopNodeOptions) RunTopNode() error {
 func getNodeMetricsFromMetricsAPI(metricsClient metricsclientset.Interface, resourceName string, selector labels.Selector) (*metricsapi.NodeMetricsList, error) {
 	var err error
 	versionedMetrics := &metricsV1beta1api.NodeMetricsList{}
-	mc := metricsClient.Metrics()
+	mc := metricsClient.MetricsV1beta1()
 	nm := mc.NodeMetricses()
 	if resourceName != "" {
 		m, err := nm.Get(resourceName, metav1.GetOptions{})
